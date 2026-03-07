@@ -52,6 +52,8 @@ function describeToolUse(toolName, toolInput) {
 async function runClaude(prompt, model, updater) {
   return new Promise((resolve, reject) => {
     const startTime = Date.now();
+    const TIMEOUT_MS = 15 * 60 * 1000; // 15 min hard timeout
+    const STALL_MS = 3 * 60 * 1000; // 3 min no output = stalled
 
     const args = [
       '-p', prompt,
@@ -61,6 +63,8 @@ async function runClaude(prompt, model, updater) {
       '--model', model,
       '--dangerously-skip-permissions',
     ];
+
+    core.info(`Spawning: claude ${args.join(' ').slice(0, 200)}...`);
 
     const child = spawn('claude', args, {
       env: { ...process.env },
@@ -72,19 +76,42 @@ async function runClaude(prompt, model, updater) {
     let lastAssistantText = '';
     let activities = [];
     let filesChanged = new Set();
+    let filesRead = new Set();
     let lastUpdateTime = 0;
+    let lastOutputTime = Date.now();
+    let eventCount = 0;
+    let turnCount = 0;
     let buffer = '';
+    let phase = 'starting'; // starting, analyzing, implementing, testing, finishing
+    let hasReceivedOutput = false;
 
     function trackActivity(desc) {
-      activities.push(desc);
-      if (activities.length > 8) activities.shift();
+      activities.push({ time: Date.now(), desc });
+      if (activities.length > 10) activities.shift();
     }
 
-    async function pushUpdate() {
+    function detectPhase() {
+      const recent = activities.slice(-3).map(a => a.desc).join(' ');
+      if (recent.match(/test|spec|jest|vitest|npm run/i)) return 'testing';
+      if (recent.match(/Write|Edit/)) return 'implementing';
+      if (recent.match(/Read|Glob|Grep|Search/)) return 'analyzing';
+      return phase;
+    }
+
+    const phaseLabels = {
+      starting: 'Starting up...',
+      analyzing: 'Analyzing codebase',
+      implementing: 'Writing code',
+      testing: 'Running tests',
+      finishing: 'Wrapping up',
+    };
+
+    async function pushUpdate(force) {
       const now = Date.now();
-      // Rate limit: max one update per 30 seconds
-      if (now - lastUpdateTime < 30000) return;
+      if (!force && now - lastUpdateTime < 20000) return;
       lastUpdateTime = now;
+
+      phase = detectPhase();
 
       const elapsed = Math.round((now - startTime) / 1000);
       const mins = Math.floor(elapsed / 60);
@@ -94,64 +121,109 @@ async function runClaude(prompt, model, updater) {
       const lines = [
         `**Issue2Claude working** — #${updater.issueNumber}`,
         '',
-        `**Elapsed:** ${timeStr}`,
+        `| | |`,
+        `|---|---|`,
+        `| **Phase** | ${phaseLabels[phase] || phase} |`,
+        `| **Elapsed** | ${timeStr} |`,
+        `| **Turns** | ${turnCount} / 30 |`,
+        `| **Events** | ${eventCount} |`,
       ];
 
+      if (!hasReceivedOutput) {
+        lines.push('', '> Waiting for Claude Code to start producing output...');
+      }
+
+      if (filesRead.size > 0) {
+        lines.push('', `**Files read:** ${filesRead.size}`);
+      }
+
       if (filesChanged.size > 0) {
-        lines.push('', `**Files touched:** ${filesChanged.size}`);
-        const fileList = [...filesChanged].slice(-5);
-        fileList.forEach(f => lines.push(`- \`${f}\``));
-        if (filesChanged.size > 5) lines.push(`- ... and ${filesChanged.size - 5} more`);
+        lines.push('', `**Files modified:** ${filesChanged.size}`);
+        [...filesChanged].forEach(f => lines.push(`- \`${f}\``));
       }
 
       if (activities.length > 0) {
         lines.push('', '**Recent activity:**');
-        activities.slice(-5).forEach(a => lines.push(`- ${a}`));
+        activities.slice(-6).forEach(a => {
+          const ago = Math.round((now - a.time) / 1000);
+          const agoStr = ago < 60 ? `${ago}s ago` : `${Math.floor(ago/60)}m ago`;
+          lines.push(`- ${a.desc} *(${agoStr})*`);
+        });
+      }
+
+      // Stall warning
+      const silentSec = Math.round((now - lastOutputTime) / 1000);
+      if (silentSec > 120 && hasReceivedOutput) {
+        lines.push('', `> No output for ${silentSec}s — Claude may be processing a large task or waiting on rate limits`);
+      }
+
+      if (stderr) {
+        const lastStderr = stderr.slice(-300).trim();
+        if (lastStderr) {
+          lines.push('', '**Stderr (last):**', '```', lastStderr, '```');
+        }
       }
 
       try {
         await updater.updateProgress(lines.join('\n'));
-      } catch {
-        // Ignore update errors
+      } catch (e) {
+        core.warning(`Failed to update progress: ${e.message}`);
       }
     }
 
     child.stdout.on('data', (data) => {
-      buffer += data.toString();
+      const chunk = data.toString();
+      buffer += chunk;
+      lastOutputTime = Date.now();
+      hasReceivedOutput = true;
 
-      // Parse newline-delimited JSON events
       const lines = buffer.split('\n');
-      buffer = lines.pop(); // Keep incomplete line in buffer
+      buffer = lines.pop();
 
       for (const line of lines) {
         if (!line.trim()) continue;
         try {
           const event = JSON.parse(line);
+          eventCount++;
 
           if (event.type === 'result') {
             lastResult = event;
+            phase = 'finishing';
+            core.info(`Claude result received: cost=$${event.cost_usd || '?'}, turns=${event.num_turns || '?'}`);
           } else if (event.type === 'assistant' && event.message) {
-            // Track tool use from assistant messages
+            turnCount = event.message.turn || turnCount;
             const msg = event.message;
             if (msg.content && Array.isArray(msg.content)) {
               for (const block of msg.content) {
                 if (block.type === 'tool_use') {
                   const desc = describeToolUse(block.name, block.input || {});
                   trackActivity(desc);
-                  core.info(`Claude: ${desc}`);
+                  core.info(`[Turn ${turnCount}] ${desc}`);
 
-                  // Track files
                   const fp = block.input?.file_path;
-                  if (fp && (block.name === 'Write' || block.name === 'Edit')) {
-                    filesChanged.add(fp.replace(process.cwd() + '/', ''));
+                  if (fp) {
+                    const relPath = fp.replace(process.cwd() + '/', '');
+                    if (block.name === 'Write' || block.name === 'Edit') {
+                      filesChanged.add(relPath);
+                    } else if (block.name === 'Read') {
+                      filesRead.add(relPath);
+                    }
                   }
 
                   pushUpdate();
                 } else if (block.type === 'text' && block.text) {
                   lastAssistantText = block.text;
+                  // Log short thinking snippets
+                  const preview = block.text.slice(0, 150).replace(/\n/g, ' ');
+                  core.info(`[Turn ${turnCount}] Claude: ${preview}...`);
                 }
               }
             }
+          } else if (event.type === 'error') {
+            const errMsg = event.error?.message || event.message || JSON.stringify(event);
+            core.error(`Claude stream error: ${errMsg}`);
+            trackActivity(`Error: ${errMsg.slice(0, 100)}`);
+            pushUpdate(true);
           }
         } catch {
           // Skip unparseable lines
@@ -160,21 +232,73 @@ async function runClaude(prompt, model, updater) {
     });
 
     child.stderr.on('data', (data) => {
-      stderr += data.toString();
+      const chunk = data.toString();
+      stderr += chunk;
+      core.warning(`Claude stderr: ${chunk.trim()}`);
+
+      // If we see auth errors, immediately report
+      if (chunk.match(/unauthorized|auth|token.*invalid|403|401/i)) {
+        trackActivity(`Auth error: ${chunk.trim().slice(0, 100)}`);
+        pushUpdate(true);
+      }
     });
 
-    // Fallback: update every 60s even without events
-    const fallbackInterval = setInterval(() => {
-      lastUpdateTime = 0; // Force update
+    // Update every 30s, detect stalls
+    const monitorInterval = setInterval(async () => {
+      const now = Date.now();
+      const elapsed = now - startTime;
+      const silent = now - lastOutputTime;
+
+      // Hard timeout
+      if (elapsed > TIMEOUT_MS) {
+        core.error(`Hard timeout reached (${TIMEOUT_MS/1000}s). Killing Claude.`);
+        trackActivity('TIMEOUT — killed after 15 minutes');
+        await pushUpdate(true);
+        child.kill('SIGTERM');
+        setTimeout(() => child.kill('SIGKILL'), 5000);
+        return;
+      }
+
+      // Stall detection (only after we've received some output)
+      if (hasReceivedOutput && silent > STALL_MS) {
+        core.warning(`No output for ${Math.round(silent/1000)}s — possible stall`);
+      }
+
+      // Force update
+      lastUpdateTime = 0;
       pushUpdate();
-    }, 60000);
+    }, 30000);
+
+    // Initial update after 5s to confirm startup
+    setTimeout(() => {
+      if (!hasReceivedOutput) {
+        trackActivity('Waiting for Claude Code to initialize...');
+        core.info('No output from Claude yet after 5s');
+      }
+      pushUpdate(true);
+    }, 5000);
 
     child.on('close', (code) => {
-      clearInterval(fallbackInterval);
+      clearInterval(monitorInterval);
       const duration = Date.now() - startTime;
 
+      core.info(`Claude process exited with code ${code} after ${Math.round(duration/1000)}s`);
+      core.info(`Events received: ${eventCount}, Turns: ${turnCount}, Files changed: ${filesChanged.size}`);
+
+      if (stderr) {
+        core.info(`Stderr output:\n${stderr.slice(-500)}`);
+      }
+
       if (code !== 0 && !lastResult && !lastAssistantText) {
-        reject(new Error(`Claude exited with code ${code}: ${stderr}`));
+        const errMsg = stderr
+          ? `Claude exited with code ${code}:\n${stderr.slice(-500)}`
+          : `Claude exited with code ${code} (no output received — check auth config)`;
+        reject(new Error(errMsg));
+        return;
+      }
+
+      if (!hasReceivedOutput) {
+        reject(new Error('Claude produced no output at all — likely an auth or startup issue. Check CLAUDE_OAUTH_TOKEN or ANTHROPIC_API_KEY.'));
         return;
       }
 
@@ -182,7 +306,7 @@ async function runClaude(prompt, model, updater) {
         output: lastResult?.result || lastAssistantText || '',
         cost: lastResult?.cost_usd || null,
         duration: lastResult?.duration_ms || duration,
-        turns: lastResult?.num_turns || null,
+        turns: lastResult?.num_turns || turnCount,
         exitCode: code,
         stderr,
         filesChanged: [...filesChanged],
@@ -191,8 +315,9 @@ async function runClaude(prompt, model, updater) {
     });
 
     child.on('error', (err) => {
-      clearInterval(fallbackInterval);
-      reject(err);
+      clearInterval(monitorInterval);
+      core.error(`Failed to spawn Claude: ${err.message}`);
+      reject(new Error(`Failed to spawn Claude Code: ${err.message}. Is @anthropic-ai/claude-code installed?`));
     });
   });
 }
