@@ -1,16 +1,33 @@
 {
   "name": "issue2claude",
-  "version": "0.1.0",
-  "description": "Automatically solve GitHub Issues with Claude Code",
+  "version": "0.4.0",
+  "description": "Label a GitHub Issue. Get a Pull Request. Claude Code solves issues autonomously.",
   "main": "action/index.js",
+  "bin": {
+    "issue2claude": "cli/init.js"
+  },
+  "keywords": [
+    "github-actions",
+    "claude",
+    "ai",
+    "automation",
+    "pull-request",
+    "code-review",
+    "anthropic",
+    "claude-code"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lennystepn-hue/issue2claude"
+  },
+  "author": "Lenny Enderle",
+  "license": "MIT",
   "scripts": {
     "test": "node tests/test.js"
   },
   "dependencies": {
     "@actions/core": "^1.10.1",
     "@actions/github": "^6.0.0",
-    "@anthropic-ai/claude-agent-sdk": "^0.2.71",
-    "@octokit/rest": "^21.0.0",
     "js-yaml": "^4.1.1"
   }
 }
