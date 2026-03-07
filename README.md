@@ -10,177 +10,414 @@ Claude Code reads your issue, analyzes your codebase, implements the fix, and op
 
 [![GitHub Marketplace](https://img.shields.io/badge/Marketplace-Issue2Claude-blue?logo=github)](https://github.com/marketplace/actions/issue2claude)
 [![npm](https://img.shields.io/npm/v/issue2claude?color=red&logo=npm)](https://www.npmjs.com/package/issue2claude)
-[![Claude Code](https://img.shields.io/badge/Claude_Code-cc785c?logo=anthropic&logoColor=white)](https://docs.anthropic.com/en/docs/claude-code)
+[![Claude Code](https://img.shields.io/badge/Powered_by-Claude_Code-cc785c?logo=anthropic&logoColor=white)](https://docs.anthropic.com/en/docs/claude-code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+<br>
+
+[Quick Start](#-quick-start) · [Features](#-features) · [Configuration](#-configuration) · [How It Works](#-how-it-works) · [Workflow Examples](#-workflow-examples)
 
 </div>
 
----
+<br>
 
-## Quick Start
+## Setup
 
-### Option A: One command setup
+### Option A: One command
 
 ```bash
 npx issue2claude
 ```
 
-The setup wizard creates everything you need: workflow file, config, and tells you exactly which secrets to add.
+The setup wizard creates your workflow file, config, and tells you which secrets to add.
 
 ### Option B: GitHub Marketplace
 
 1. Go to the [Issue2Claude Marketplace page](https://github.com/marketplace/actions/issue2claude)
 2. Click **"Use latest version"**
 3. Add your secret (`ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`)
-4. Enable PR creation in Settings > Actions > General
+4. Enable PR creation: **Settings > Actions > General > Allow GitHub Actions to create pull requests**
 
-### Option C: Manual setup
+### Option C: Manual
 
 <details>
 <summary>Click to expand</summary>
 
-1. Create `.github/workflows/issue2claude.yml` (copy from examples below)
-2. Add your auth secret
-3. Enable "Allow GitHub Actions to create and approve pull requests" in Settings > Actions > General
-4. Create an issue, add `claude-ready` label
+1. Create `.github/workflows/issue2claude.yml` — see [Workflow Examples](#-workflow-examples)
+2. Add your auth secret to the repo
+3. Enable **"Allow GitHub Actions to create and approve pull requests"** in Settings > Actions > General
+4. Create an issue, add the `claude-ready` label
 
 </details>
 
-**After setup:** write an issue, add the `claude-ready` label, and watch the magic happen.
+<br>
 
----
-
-## How It Works
-
-```
-  Issue + label           GitHub Actions         Claude Code            Pull Request
-  ┌──────────┐           ┌──────────┐          ┌──────────┐          ┌──────────┐
-  │  claude-  │──trigger──│ workflow │──spawn──▸│ reads    │──push──▸│ auto-    │
-  │  ready    │           │ runs     │          │ codes    │          │ created  │
-  │           │           │          │          │ tests    │          │ reviewed │
-  └──────────┘           └──────────┘          └──────────┘          └──────────┘
-```
-
-1. You write a GitHub Issue describing what needs to be done
-2. Add the label **`claude-ready`**
-3. Claude Code reads your repo, implements the solution, auto-reviews it
-4. A PR appears with the solution and a summary of changes
-5. You review and merge
+> **After setup:** Write an issue, add the `claude-ready` label, and watch the magic happen.
 
 ---
 
 ## Features
 
-### Issue to PR
-Label `claude-ready` on any issue. Claude solves it and opens a PR.
+<table>
+<tr>
+<td width="50%">
+
+### Issue → PR
+Label any issue with `claude-ready`. Claude analyzes the codebase, implements the solution, auto-reviews it, and opens a PR with a summary.
+
+**Retry:** Comment `claude-retry` on the issue to re-run.
+
+</td>
+<td width="50%">
 
 ### PR Feedback Loop
-**Comment `claude-fix` on a PR** — Claude reads your review comments and applies the changes.
+Comment `claude-fix` on a PR. Claude reads your review comments and applies the changes — then pushes to the same branch.
 
 ```
-You: "Move this to a utils file"
-     "Add error handling here"
-     → claude-fix
-
-Claude: *applies feedback, pushes to branch*
+You:    "Move this to a utils file"
+        "Add error handling here"
+        → claude-fix
+Claude: applies changes, pushes
 ```
 
-Repeat until it's perfect. No other tool does this.
+Repeat until it's perfect.
+
+</td>
+</tr>
+<tr>
+<td>
 
 ### Auto-Review
-Every PR gets a second Claude pass before creation. Reviews for bugs, security issues, and missing edge cases. Finds problems → fixes them → then creates the PR.
+Every PR gets a second Claude pass before creation. It reviews for bugs, security issues, and edge cases. Finds problems → fixes them → then creates the PR.
+
+</td>
+<td>
+
+### Auto-Rebase
+Comment `claude-rebase` on a PR with merge conflicts. Claude rebases the branch, resolves conflicts intelligently, and pushes. No manual conflict resolution needed.
+
+</td>
+</tr>
+<tr>
+<td>
 
 ### Slash Commands
-Comment on any issue:
 
 | Command | What it does |
 |---------|-------------|
-| `/claude estimate` | Estimates effort + affected files |
+| `/claude estimate` | Effort estimate + affected files |
 | `/claude explain` | Explains the relevant code |
-| `/claude test` | Writes tests only (creates PR) |
-| `/claude refactor` | Refactors without behavior change (creates PR) |
+| `/claude test` | Writes tests (creates PR) |
+| `/claude refactor` | Refactors code (creates PR) |
 
-### Auto-Rebase
-**Comment `claude-rebase` on a PR** with merge conflicts. Claude rebases the branch, resolves conflicts intelligently, and force-pushes. No more manual conflict resolution.
+</td>
+<td>
 
-### PR Chain
+### PR Chain (Dependencies)
 Issues can declare dependencies:
 
 ```markdown
 depends-on: #12
 ```
 
-Issue2Claude waits until `#12` is resolved. If `#12` has an open PR, the new branch is based on that PR's branch — changes stack cleanly.
+Issue2Claude waits until `#12` is resolved. If `#12` has an open PR, the new branch stacks on top of it.
 
 Also supports: `depends on #12, #13`, `after #12`, `blocked-by: #15`
 
-### Smart Model Selection
-Claude auto-detects issue complexity and picks the right model:
-- **Simple** (typo, config, rename) → Sonnet (fast + cheap)
-- **Complex** (new feature, refactor) → Opus (best quality)
+</td>
+</tr>
+</table>
 
-Enabled by default. Override with `model` input or disable in config.
+### Smart Features
 
-### Context Learning
-After every successful PR, Claude extracts patterns from what it did and saves them to `.issue2claude-context.md` in your repo. Next time Claude runs, it reads this file and knows your codebase better.
+<table>
+<tr>
+<td width="33%">
 
-Over time it learns things like: *"Components use .tsx in src/components/"*, *"Tests use Vitest"*, *"API routes in src/app/api/"*
+#### Smart Model Selection
+Auto-detects issue complexity and picks the right model:
+
+| Complexity | Model |
+|-----------|-------|
+| Simple (typo, config) | Sonnet — fast & cheap |
+| Complex (feature, refactor) | Opus — best quality |
+
+</td>
+<td width="33%">
+
+#### Repo Context Index
+Uses **OpenAI Embeddings** to build a semantic index of your codebase. When an issue comes in, the most relevant code chunks are found via cosine similarity and injected into Claude's prompt.
+
+> Embeddings = **smart file finder**, not the whole repo. Claude uses them as a starting point to navigate further.
+
+</td>
+<td width="34%">
+
+#### Context Learning
+After every successful PR, Claude extracts patterns and saves them to `.issue2claude-context.md`. Over time it learns:
+
+- *"Components use .tsx in src/components/"*
+- *"Tests use Vitest with describe/it"*
+- *"API routes in src/app/api/"*
+
+</td>
+</tr>
+</table>
 
 ### Live Progress
-Real-time updates in the issue comment: phase tracking, files touched, activity log, elapsed time.
+
+Real-time status updates in the issue comment while Claude works — current phase, files touched, activity log, elapsed time.
 
 ---
 
-## For Vibe Coders
-
-Just paste this into Claude Code, Cursor, or any AI coding assistant:
+## How It Works
 
 ```
-Add Issue2Claude to this repo. It's a GitHub Action that automatically solves
-GitHub Issues with Claude Code.
-
-1. Create .github/workflows/issue2claude.yml with this workflow:
-   - Trigger on issues labeled "claude-ready" and comments containing "claude-retry"
-   - Also trigger on PR comments containing "claude-fix" (for feedback) and "claude-rebase" (for conflicts)
-   - Also trigger on issue comments containing "/claude" (for slash commands)
-   - Use the action: lennystepn-hue/issue2claude@main
-   - Auth mode: max with oauth-token from secrets.CLAUDE_CODE_OAUTH_TOKEN
-   - Needs permissions: contents write, pull-requests write, issues write
-   - Needs: actions/checkout (fetch-depth 0), actions/setup-node (22), npm install -g @anthropic-ai/claude-code@latest
-
-2. Create .issue2claude.yml config with smart_model enabled and auto_review true
-
-See https://github.com/lennystepn-hue/issue2claude for full docs.
+  You write an issue        GitHub Actions          Claude Code             Pull Request
+  ┌─────────────────┐      ┌──────────────┐      ┌──────────────────┐     ┌──────────────┐
+  │ Add label        │─────▸│ Triggers     │─────▸│ Reads codebase   │────▸│ PR created   │
+  │ "claude-ready"   │      │ workflow     │      │ Finds relevant   │     │ with summary │
+  │                  │      │              │      │ files (embeddings)│     │ auto-reviewed│
+  └─────────────────┘      └──────────────┘      │ Implements fix   │     └──────────────┘
+                                                  │ Runs tests       │
+                                                  │ Self-reviews     │
+                                                  └──────────────────┘
 ```
 
-That's it. Your AI assistant sets up everything.
+1. **You** write a GitHub Issue describing the task
+2. **You** add the `claude-ready` label
+3. **Claude** uses the repo index to find relevant code, reads files, implements the solution
+4. **Claude** self-reviews the changes (auto-review) and fixes any issues
+5. **A PR** appears with the solution and a summary of what changed
+6. **You** review and merge
+
+---
+
+## Configuration
+
+Create `.issue2claude.yml` in your repo root (optional):
+
+```yaml
+# Model (overrides smart model selection)
+model: claude-opus-4-6
+
+# Features
+auto_review: true          # Self-review before PR creation (default: true)
+context_learning: true     # Learn patterns after each run (default: true)
+
+# Smart model: auto-pick based on issue complexity
+smart_model:
+  simple: claude-sonnet-4-6
+  complex: claude-opus-4-6
+
+# Trigger
+trigger_label: claude-ready
+
+# Security
+restricted_paths:          # Files Claude cannot touch
+  - ".env*"
+  - "secrets/"
+  - "*.key"
+  - "*.pem"
+
+# Extra context files Claude reads before working
+context_files:
+  - "ARCHITECTURE.md"
+  - "CONTRIBUTING.md"
+
+# Branch naming
+branch_prefix: issue2claude
+```
+
+> Also reads `CLAUDE.md` if present in your repo root.
 
 ---
 
 ## Authentication
 
 <table>
-<tr><th></th><th>API Key (pay per use)</th><th>Claude Max/Pro (subscription)</th></tr>
+<tr>
+<th></th>
+<th>API Key <code>(pay per use)</code></th>
+<th>Claude Max/Pro <code>(subscription)</code></th>
+</tr>
 <tr>
 <td><strong>Cost</strong></td>
-<td>~$0.02-$1.00 per issue</td>
+<td>~$0.02–$1.00 per issue</td>
 <td>Included in subscription</td>
 </tr>
 <tr>
-<td><strong>Secret</strong></td>
-<td><code>ANTHROPIC_API_KEY</code></td>
-<td><code>CLAUDE_CODE_OAUTH_TOKEN</code></td>
+<td><strong>Setup</strong></td>
+<td>Add <code>ANTHROPIC_API_KEY</code> to repo secrets</td>
+<td>Add <code>CLAUDE_CODE_OAUTH_TOKEN</code> to repo secrets</td>
 </tr>
 <tr>
-<td><strong>Get it</strong></td>
+<td><strong>Get token</strong></td>
 <td><a href="https://console.anthropic.com/">console.anthropic.com</a></td>
-<td><code>claude setup-token</code></td>
+<td>Run <code>claude setup-token</code> in terminal</td>
+</tr>
+<tr>
+<td><strong>Workflow</strong></td>
+<td><code>auth-mode: api-key</code></td>
+<td><code>auth-mode: max</code></td>
 </tr>
 </table>
+
+### Optional: Repo Context Index
+
+To enable the semantic code search, add `OPENAI_API_KEY` to your repo secrets and include the `update-index` job in your workflow (see examples below). The index rebuilds on every push to your main branch.
 
 ---
 
 ## Workflow Examples
+
+<details>
+<summary><strong>Full workflow — Claude Max/Pro (recommended)</strong></summary>
+
+```yaml
+name: Issue2Claude
+
+on:
+  issues:
+    types: [labeled]
+  issue_comment:
+    types: [created]
+  push:
+    branches: [main]
+
+jobs:
+  # Rebuild repo index on push
+  update-index:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions: { contents: write }
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - run: npm install -g @anthropic-ai/claude-code@latest
+      - uses: lennystepn-hue/issue2claude@main
+        with:
+          mode: index
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          repo: ${{ github.repository }}
+
+  # Solve issues
+  solve-issue:
+    if: |
+      (github.event_name == 'issues' && github.event.label.name == 'claude-ready') ||
+      (github.event_name == 'issue_comment' &&
+       !github.event.issue.pull_request &&
+       contains(github.event.comment.body, 'claude-retry') &&
+       (github.event.comment.author_association == 'OWNER' ||
+        github.event.comment.author_association == 'MEMBER' ||
+        github.event.comment.author_association == 'COLLABORATOR'))
+    runs-on: ubuntu-latest
+    permissions: { contents: write, pull-requests: write, issues: write }
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - run: npm install -g @anthropic-ai/claude-code@latest
+      - uses: lennystepn-hue/issue2claude@main
+        with:
+          mode: issue
+          auth-mode: max
+          oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          issue-number: ${{ github.event.issue.number }}
+          issue-title: ${{ github.event.issue.title }}
+          issue-body: ${{ github.event.issue.body }}
+          repo: ${{ github.repository }}
+
+  # Apply PR feedback
+  pr-feedback:
+    if: |
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, 'claude-fix') &&
+      (github.event.comment.author_association == 'OWNER' ||
+       github.event.comment.author_association == 'MEMBER' ||
+       github.event.comment.author_association == 'COLLABORATOR')
+    runs-on: ubuntu-latest
+    permissions: { contents: write, pull-requests: write, issues: write }
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - run: npm install -g @anthropic-ai/claude-code@latest
+      - uses: lennystepn-hue/issue2claude@main
+        with:
+          mode: pr-feedback
+          auth-mode: max
+          oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          pr-number: ${{ github.event.issue.number }}
+          repo: ${{ github.repository }}
+
+  # Auto-rebase PRs with conflicts
+  rebase:
+    if: |
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, 'claude-rebase') &&
+      (github.event.comment.author_association == 'OWNER' ||
+       github.event.comment.author_association == 'MEMBER' ||
+       github.event.comment.author_association == 'COLLABORATOR')
+    runs-on: ubuntu-latest
+    permissions: { contents: write, pull-requests: write, issues: write }
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - run: npm install -g @anthropic-ai/claude-code@latest
+      - uses: lennystepn-hue/issue2claude@main
+        with:
+          mode: rebase
+          auth-mode: max
+          oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          pr-number: ${{ github.event.issue.number }}
+          repo: ${{ github.repository }}
+
+  # Slash commands (/claude estimate, explain, test, refactor)
+  slash-command:
+    if: |
+      github.event_name == 'issue_comment' &&
+      !github.event.issue.pull_request &&
+      contains(github.event.comment.body, '/claude') &&
+      (github.event.comment.author_association == 'OWNER' ||
+       github.event.comment.author_association == 'MEMBER' ||
+       github.event.comment.author_association == 'COLLABORATOR')
+    runs-on: ubuntu-latest
+    permissions: { contents: write, pull-requests: write, issues: write }
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - run: npm install -g @anthropic-ai/claude-code@latest
+      - uses: lennystepn-hue/issue2claude@main
+        with:
+          mode: slash-command
+          auth-mode: max
+          oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          issue-number: ${{ github.event.issue.number }}
+          issue-title: ${{ github.event.issue.title }}
+          issue-body: ${{ github.event.issue.body }}
+          comment-body: ${{ github.event.comment.body }}
+          repo: ${{ github.repository }}
+```
+
+</details>
 
 <details>
 <summary><strong>API Key mode</strong></summary>
@@ -276,130 +513,34 @@ jobs:
           comment-body: ${{ github.event.comment.body }}
           repo: ${{ github.repository }}
 ```
-</details>
 
-<details open>
-<summary><strong>Claude Max/Pro mode</strong></summary>
-
-```yaml
-name: Issue2Claude
-
-on:
-  issues:
-    types: [labeled]
-  issue_comment:
-    types: [created]
-
-jobs:
-  solve-issue:
-    if: |
-      (github.event_name == 'issues' && github.event.label.name == 'claude-ready') ||
-      (github.event_name == 'issue_comment' &&
-       !github.event.issue.pull_request &&
-       contains(github.event.comment.body, 'claude-retry') &&
-       (github.event.comment.author_association == 'OWNER' ||
-        github.event.comment.author_association == 'MEMBER' ||
-        github.event.comment.author_association == 'COLLABORATOR'))
-    runs-on: ubuntu-latest
-    permissions: { contents: write, pull-requests: write, issues: write }
-    steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
-      - uses: actions/setup-node@v4
-        with: { node-version: '22' }
-      - run: npm install -g @anthropic-ai/claude-code@latest
-      - uses: lennystepn-hue/issue2claude@main
-        with:
-          mode: issue
-          auth-mode: max
-          oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          issue-number: ${{ github.event.issue.number }}
-          issue-title: ${{ github.event.issue.title }}
-          issue-body: ${{ github.event.issue.body }}
-          repo: ${{ github.repository }}
-
-  pr-feedback:
-    if: |
-      github.event_name == 'issue_comment' &&
-      github.event.issue.pull_request &&
-      contains(github.event.comment.body, 'claude-fix') &&
-      (github.event.comment.author_association == 'OWNER' ||
-       github.event.comment.author_association == 'MEMBER' ||
-       github.event.comment.author_association == 'COLLABORATOR')
-    runs-on: ubuntu-latest
-    permissions: { contents: write, pull-requests: write, issues: write }
-    steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
-      - uses: actions/setup-node@v4
-        with: { node-version: '22' }
-      - run: npm install -g @anthropic-ai/claude-code@latest
-      - uses: lennystepn-hue/issue2claude@main
-        with:
-          mode: pr-feedback
-          auth-mode: max
-          oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          pr-number: ${{ github.event.issue.number }}
-          repo: ${{ github.repository }}
-
-  slash-command:
-    if: |
-      github.event_name == 'issue_comment' &&
-      !github.event.issue.pull_request &&
-      contains(github.event.comment.body, '/claude') &&
-      (github.event.comment.author_association == 'OWNER' ||
-       github.event.comment.author_association == 'MEMBER' ||
-       github.event.comment.author_association == 'COLLABORATOR')
-    runs-on: ubuntu-latest
-    permissions: { contents: write, pull-requests: write, issues: write }
-    steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
-      - uses: actions/setup-node@v4
-        with: { node-version: '22' }
-      - run: npm install -g @anthropic-ai/claude-code@latest
-      - uses: lennystepn-hue/issue2claude@main
-        with:
-          mode: slash-command
-          auth-mode: max
-          oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          issue-number: ${{ github.event.issue.number }}
-          issue-title: ${{ github.event.issue.title }}
-          issue-body: ${{ github.event.issue.body }}
-          comment-body: ${{ github.event.comment.body }}
-          repo: ${{ github.repository }}
-```
 </details>
 
 ---
 
-## Configuration
+## For Vibe Coders
 
-Optionally place `.issue2claude.yml` in your repo root:
+Paste this into Claude Code, Cursor, or any AI assistant and it sets up everything:
 
-```yaml
-model: claude-opus-4-6        # or claude-sonnet-4-6 (overrides smart model)
-auto_review: true              # second Claude pass before PR (default: true)
-context_learning: true         # learn patterns after each run (default: true)
-trigger_label: claude-ready
-
-# Smart model: auto-pick based on complexity (default: enabled)
-smart_model:
-  simple: claude-sonnet-4-6   # for typos, config changes
-  complex: claude-opus-4-6    # for new features, refactors
-
-restricted_paths:              # files Claude cannot touch
-  - ".env*"
-  - "secrets/"
-
-context_files:                 # extra files Claude reads for context
-  - "ARCHITECTURE.md"
 ```
+Add Issue2Claude to this repo. It's a GitHub Action that automatically solves
+GitHub Issues with Claude Code.
 
-Also reads `CLAUDE.md` if present.
+1. Create .github/workflows/issue2claude.yml with this workflow:
+   - Trigger on issues labeled "claude-ready" and comments containing "claude-retry"
+   - Trigger on PR comments with "claude-fix" (feedback) and "claude-rebase" (conflicts)
+   - Trigger on issue comments with "/claude" (slash commands)
+   - Trigger on push to main (for repo index)
+   - Use the action: lennystepn-hue/issue2claude@main
+   - Auth mode: max with oauth-token from secrets.CLAUDE_CODE_OAUTH_TOKEN
+   - Needs permissions: contents write, pull-requests write, issues write
+   - Needs: actions/checkout (fetch-depth 0), actions/setup-node (22),
+     npm install -g @anthropic-ai/claude-code@latest
+
+2. Create .issue2claude.yml config with smart_model enabled and auto_review true
+
+See https://github.com/lennystepn-hue/issue2claude for full docs.
+```
 
 ---
 
@@ -408,40 +549,46 @@ Also reads `CLAUDE.md` if present.
 ```
 issue2claude/
 ├── cli/
-│   └── init.js               # npx issue2claude setup wizard
+│   └── init.js                # npx issue2claude — setup wizard
 ├── action/
-│   ├── index.js               # Orchestrator
+│   ├── index.js               # Main orchestrator
 │   ├── prompt-builder.js      # Issue → Claude prompt
-│   ├── pr-creator.js          # Branch, commit, PR creation
+│   ├── pr-creator.js          # Branch, commit, push, PR
 │   ├── pr-feedback.js         # claude-fix feedback loop
-│   ├── auto-review.js         # Multi-agent code review
-│   ├── slash-commands.js      # /claude commands
-│   ├── pr-chain.js            # Dependency resolution
-│   └── issue-updater.js       # Live issue updates
+│   ├── pr-rebase.js           # claude-rebase conflict resolution
+│   ├── auto-review.js         # Multi-agent self-review
+│   ├── slash-commands.js      # /claude estimate|explain|test|refactor
+│   ├── pr-chain.js            # Issue dependency resolution
+│   ├── smart-model.js         # Complexity → model picker
+│   ├── context-learning.js    # Pattern extraction after runs
+│   ├── repo-index.js          # OpenAI embeddings code search
+│   └── issue-updater.js       # Live progress in issue comments
 ├── action.yml                 # GitHub Action metadata
-└── package.json               # npx entry point
+└── package.json               # npm package + CLI entry
 ```
 
 ---
 
 ## Security
 
-- Claude runs in an **isolated CI container** — no access to your secrets
-- `--dangerously-skip-permissions` is safe because the container is ephemeral
-- Restricted paths prevent touching sensitive files
-- Only owners, members, and collaborators can trigger commands
-- All changes go through a PR — nothing touches main directly
+- Claude runs in an **isolated CI container** — no access to your machine or secrets
+- Restricted paths prevent Claude from touching sensitive files (`.env`, keys, workflows)
+- Only repo **owners, members, and collaborators** can trigger commands
+- All changes go through a **PR** — nothing touches your main branch directly
+- The repo index (embeddings) contains only file previews, not full source code
 
 ---
 
 ## Troubleshooting
 
-| Error | Fix |
-|-------|-----|
+| Problem | Solution |
+|---------|----------|
 | "not permitted to create pull requests" | Settings > Actions > General > Enable PR creation |
-| Claude hangs with no output | Check your OAuth token / API key |
-| No changes detected | Try a more detailed issue description |
-| Dependencies not resolved | Close/merge the dependency issues first |
+| "refusing to allow GitHub App to create workflow" | Claude tried to modify `.github/workflows/` — this is auto-blocked, retry should work |
+| Claude hangs with no output | Verify your OAuth token or API key is valid |
+| No changes detected | Write a more detailed issue description |
+| Dependencies not resolved | Close or merge the dependency issues/PRs first |
+| Index build fails | Check that `OPENAI_API_KEY` is set in repo secrets |
 
 ---
 
