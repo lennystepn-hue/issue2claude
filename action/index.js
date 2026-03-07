@@ -131,6 +131,26 @@ async function runClaude(prompt, model, updater) {
     }
   }
 
+  // Ensure Claude Code CLI is in PATH (GitHub Actions may not propagate PATH between steps)
+  const possiblePaths = [
+    path.join(process.env.HOME || '', '.local', 'bin'),
+    '/usr/local/bin',
+    path.join(process.env.HOME || '', '.npm-global', 'bin'),
+  ];
+  for (const p of possiblePaths) {
+    if (!process.env.PATH.includes(p)) {
+      process.env.PATH = `${p}:${process.env.PATH}`;
+    }
+  }
+
+  // Verify claude is available
+  try {
+    const claudePath = execSync('which claude 2>/dev/null || echo NOT_FOUND', { encoding: 'utf-8' }).trim();
+    core.info(`Claude CLI found at: ${claudePath}`);
+  } catch {
+    core.warning('Could not locate claude CLI');
+  }
+
   // Run Claude via SDK
   core.info(`Running Claude via Agent SDK (model: ${model})...`);
 
