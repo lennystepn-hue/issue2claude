@@ -28,7 +28,7 @@ async function createPR({ octokit, owner, repo, issueNumber, issueTitle, summary
   const commitFile = path.join(process.env.RUNNER_TEMP || '/tmp', 'commit-msg.txt');
   fs.writeFileSync(commitFile, commitMsg);
   execSync(`git commit -F "${commitFile}"`);
-  execSync(`git push origin ${branchName}`);
+  execSync(`git push --force origin ${branchName}`);
 
   // Get changed files
   const changedFiles = execSync('git diff --name-only HEAD~1').toString().trim();
