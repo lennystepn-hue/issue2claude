@@ -9,7 +9,7 @@ function readFileIfExists(filePath) {
   }
 }
 
-function buildPrompt({ issueNumber, issueTitle, issueBody, comments, config }) {
+function buildPrompt({ issueNumber, issueTitle, issueBody, comments, config, repoContext }) {
   const claudeMd = readFileIfExists(path.join(process.cwd(), 'CLAUDE.md'));
   const configContent = readFileIfExists(path.join(process.cwd(), '.issue2claude.yml'));
   const contextLearning = readFileIfExists(path.join(process.cwd(), '.issue2claude-context.md'));
@@ -55,6 +55,7 @@ ${commentsSection ? `## Issue comments (for more context)\n${commentsSection}` :
 ${claudeMd ? `### CLAUDE.md\n${claudeMd}` : ''}
 ${configContent ? `### .issue2claude.yml\n${configContent}` : ''}
 ${contextLearning ? `### Learned patterns (from previous runs)\n${contextLearning}` : ''}
+${repoContext || ''}
 ${additionalContext}
 
 ## What you need to do

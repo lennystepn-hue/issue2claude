@@ -1,6 +1,6 @@
 {
   "name": "issue2claude",
-  "version": "0.4.0",
+  "version": "0.6.0",
   "description": "Label a GitHub Issue. Get a Pull Request. Claude Code solves issues autonomously.",
   "main": "action/index.js",
   "bin": {

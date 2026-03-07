@@ -15,6 +15,7 @@ const { parseDependencies, checkDependencies, findBaseBranch } = require('./pr-c
 const { buildConflictPrompt, getConflictFiles } = require('./pr-rebase');
 const { analyzeComplexity, pickModel } = require('./smart-model');
 const { readContext, learnFromRun } = require('./context-learning');
+const { buildIndex, loadIndex, searchIndex, formatContext } = require('./repo-index');
 
 function loadConfig() {
   const configPath = path.join(process.cwd(), '.issue2claude.yml');
@@ -334,7 +335,27 @@ async function runIssueMode({ octokit, owner, repo, issueNumber, issueTitle, iss
     const comments = await updater.fetchComments();
     core.info(`Fetched ${comments.length} issue comments for context`);
 
-    const prompt = buildPrompt({ issueNumber, issueTitle, issueBody, comments, config });
+    // === Repo Context Index: find relevant code via embeddings ===
+    let repoContext = '';
+    const openaiKey = core.getInput('openai-api-key');
+    if (openaiKey && config.repo_index !== false) {
+      try {
+        let index = loadIndex(process.cwd());
+        if (!index) {
+          core.info('No repo index found, building...');
+          index = await buildIndex(process.cwd(), openaiKey);
+        }
+
+        const query = `${issueTitle}\n${issueBody || ''}`;
+        const results = await searchIndex(query, index, openaiKey, 15);
+        repoContext = formatContext(results);
+        core.info(`Repo index: found ${results.length} relevant code chunks`);
+      } catch (e) {
+        core.warning(`Repo index failed (non-fatal): ${e.message}`);
+      }
+    }
+
+    const prompt = buildPrompt({ issueNumber, issueTitle, issueBody, comments, config, repoContext });
     core.info('Prompt built successfully');
 
     const result = await runClaude(prompt, model, updater);
@@ -750,7 +771,34 @@ async function run() {
     }
   }
 
-  if (mode === 'rebase') {
+  if (mode === 'index') {
+    const openaiKey = core.getInput('openai-api-key');
+    if (!openaiKey) {
+      core.setFailed('openai-api-key is required for index mode');
+      return;
+    }
+    try {
+      const index = await buildIndex(process.cwd(), openaiKey);
+      core.info(`Index built: ${index.chunks.length} chunks`);
+
+      // Commit the index
+      execSync('git config user.email "issue2claude[bot]@users.noreply.github.com"');
+      execSync('git config user.name "Issue2Claude"');
+      execSync(`git add ${path.join('.issue2claude', 'embeddings.json')}`);
+
+      const hasChanges = execSync('git diff --cached --name-only', { encoding: 'utf-8' }).trim();
+      if (hasChanges) {
+        execSync('git commit -m "chore: update issue2claude repo index"');
+        execSync('git push');
+        core.info('Index committed and pushed.');
+      } else {
+        core.info('Index unchanged, nothing to commit.');
+      }
+    } catch (e) {
+      core.setFailed(`Index build failed: ${e.message}`);
+    }
+    return;
+  } else if (mode === 'rebase') {
     const prNumber = parseInt(core.getInput('pr-number'), 10);
     if (!prNumber) {
       core.setFailed('pr-number is required for rebase mode');

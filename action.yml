@@ -52,6 +52,10 @@ inputs:
     description: 'Comment body (used for slash-command mode to detect /claude commands)'
     required: false
     default: ''
+  openai-api-key:
+    description: 'OpenAI API key for repo context index (embeddings). Optional but recommended.'
+    required: false
+    default: ''
 
 runs:
   using: 'node20'
