@@ -11,7 +11,7 @@ const { createPR } = require('./pr-creator');
 const { fetchPRContext, buildFeedbackPrompt } = require('./pr-feedback');
 const { buildReviewPrompt, buildFixPrompt, parseReview } = require('./auto-review');
 const { parseSlashCommand, buildSlashCommandPrompt } = require('./slash-commands');
-const { buildSplitPrompt, parseSplitResult } = require('./issue-splitter');
+const { parseDependencies, checkDependencies, findBaseBranch } = require('./pr-chain');
 
 function loadConfig() {
   const configPath = path.join(process.cwd(), '.issue2claude.yml');
@@ -286,6 +286,46 @@ async function runIssueMode({ octokit, owner, repo, issueNumber, issueTitle, iss
 
   try {
     core.info(`Starting Issue2Claude for issue #${issueNumber}`);
+
+    // === PR Chain: Check dependencies ===
+    const dependencies = parseDependencies(issueBody);
+    if (dependencies.length > 0) {
+      core.info(`Issue has dependencies: ${dependencies.map(d => `#${d}`).join(', ')}`);
+      const depResults = await checkDependencies(octokit, owner, repo, dependencies);
+      const unresolved = depResults.filter(d => !d.resolved);
+
+      if (unresolved.length > 0) {
+        const depList = depResults.map(d =>
+          `- #${d.number} (${d.title}) — ${d.resolved ? 'resolved' : '**not resolved**'}`
+        ).join('\n');
+
+        await octokit.rest.issues.createComment({
+          owner, repo, issue_number: issueNumber,
+          body: [
+            '**Issue2Claude — Waiting for dependencies**',
+            '',
+            'This issue depends on other issues that are not yet resolved:',
+            '',
+            depList,
+            '',
+            'Issue2Claude will run automatically when the dependencies are closed.',
+            'Or comment `claude-retry` to force a run anyway.',
+          ].join('\n'),
+        });
+
+        core.info(`Skipping — ${unresolved.length} unresolved dependencies`);
+        return;
+      }
+
+      // All dependencies resolved — check if we should base on a dependency branch
+      const depBranch = await findBaseBranch(octokit, owner, repo, dependencies);
+      if (depBranch) {
+        core.info(`Basing on dependency branch: ${depBranch}`);
+        execSync(`git fetch origin ${depBranch}`);
+        execSync(`git checkout ${depBranch}`);
+      }
+    }
+
     await updater.postStartComment(model);
 
     const comments = await updater.fetchComments();
@@ -569,66 +609,6 @@ async function runSlashCommandMode({ octokit, owner, repo, issueNumber, issueTit
   }
 }
 
-async function runSplitMode({ octokit, owner, repo, issueNumber, issueTitle, issueBody, model, config }) {
-  const updater = new IssueUpdater(octokit, owner, repo, issueNumber);
-
-  try {
-    core.info(`Running issue split on #${issueNumber}`);
-
-    await octokit.rest.issues.createComment({
-      owner, repo, issue_number: issueNumber,
-      body: `**Issue2Claude** — Analyzing issue to split into sub-tasks...\n\n\`Model: ${model}\``,
-    });
-
-    const prompt = buildSplitPrompt({ issueTitle, issueBody });
-    const result = await runClaude(prompt, model, updater, { allowedTools: 'Read,Glob,Grep,Bash', maxTurns: 100 });
-
-    const subIssues = parseSplitResult(result.output, issueNumber);
-
-    if (subIssues.length === 0) {
-      await octokit.rest.issues.createComment({
-        owner, repo, issue_number: issueNumber,
-        body: '**Issue2Claude — Split result**\n\nThis issue is small enough to be solved as a single task. No split needed.',
-      });
-      return;
-    }
-
-    // Create sub-issues
-    const createdIssues = [];
-    for (const sub of subIssues) {
-      const { data } = await octokit.rest.issues.create({
-        owner, repo,
-        title: sub.title,
-        body: sub.body,
-        labels: ['claude-ready'],
-      });
-      createdIssues.push({ number: data.number, title: data.title });
-      core.info(`Created sub-issue #${data.number}: ${data.title}`);
-    }
-
-    // Post summary on parent issue
-    const issueList = createdIssues.map(i => `- #${i.number} — ${i.title}`).join('\n');
-    await octokit.rest.issues.createComment({
-      owner, repo, issue_number: issueNumber,
-      body: [
-        `**Issue2Claude — Split into ${createdIssues.length} sub-issues**`,
-        '',
-        issueList,
-        '',
-        'Each sub-issue has been labeled `claude-ready` and will be picked up automatically.',
-      ].join('\n'),
-    });
-
-  } catch (error) {
-    core.error(`Issue split failed: ${error.message}`);
-    await octokit.rest.issues.createComment({
-      owner, repo, issue_number: issueNumber,
-      body: `**Issue2Claude — Error splitting issue**\n\n${error.message}`,
-    });
-    core.setFailed(error.message);
-  }
-}
-
 async function run() {
   const authMode = core.getInput('auth-mode') || 'api-key';
   const apiKey = core.getInput('anthropic-api-key');
@@ -667,12 +647,6 @@ async function run() {
     }
 
     await runSlashCommandMode({ octokit, owner, repo, issueNumber, issueTitle, issueBody, command, model, config });
-  } else if (mode === 'split') {
-    const issueNumber = parseInt(core.getInput('issue-number'), 10);
-    const issueTitle = core.getInput('issue-title');
-    const issueBody = core.getInput('issue-body');
-
-    await runSplitMode({ octokit, owner, repo, issueNumber, issueTitle, issueBody, model, config });
   } else {
     const issueNumber = parseInt(core.getInput('issue-number'), 10);
     const issueTitle = core.getInput('issue-title');

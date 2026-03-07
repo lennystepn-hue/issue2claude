@@ -325,14 +325,28 @@ auto_review: false
 
 ---
 
-## Issue Splitting
+## PR Chain (Dependent Issues)
 
-Got a big issue? Label it **`claude-split`** or comment `/claude split`:
+Issues can declare dependencies. Issue2Claude respects the order automatically.
 
-1. Claude analyzes the issue and the codebase
-2. Creates 2-5 smaller, independent sub-issues
-3. Each sub-issue is auto-labeled `claude-ready`
-4. Claude picks them up one by one
+Add this anywhere in your issue description:
+```
+depends-on: #12
+```
+
+Other supported formats: `depends on #12, #13`, `after #12`, `blocked-by: #15`
+
+**What happens:**
+- If `#12` is not yet resolved → Issue2Claude posts a comment and **waits**
+- Once `#12` is closed (via merged PR) → re-trigger with `claude-retry` or re-label
+- If `#12` has an open PR → Issue2Claude **bases its branch on that PR's branch**, so changes stack cleanly
+
+This means you can create a chain of issues that build on each other:
+```
+Issue #10: Add user model        → PR #11
+Issue #12: Add auth (depends-on: #10) → PR #13 (based on PR #11's branch)
+Issue #14: Add dashboard (depends-on: #12) → PR #15 (based on PR #13's branch)
+```
 
 ---
 
@@ -442,7 +456,7 @@ issue2claude/
 │   ├── pr-feedback.js        # Handles claude-fix PR feedback loop
 │   ├── auto-review.js        # Auto-reviews code before PR creation
 │   ├── slash-commands.js     # /claude estimate, explain, test, refactor
-│   ├── issue-splitter.js     # Splits large issues into sub-tasks
+│   ├── pr-chain.js           # Dependency checking for chained issues
 │   └── issue-updater.js      # Posts live updates to the issue
 ├── .github/
 │   ├── workflows/

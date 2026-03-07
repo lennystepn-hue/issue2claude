@@ -112,38 +112,3 @@ jobs:
           comment-body: ${{ github.event.comment.body }}
           repo: ${{ github.repository }}
 
-  # Job 4: Split large issues (/claude split or label claude-split)
-  split-issue:
-    if: |
-      (github.event_name == 'issues' && github.event.label.name == 'claude-split') ||
-      (github.event_name == 'issue_comment' &&
-       !github.event.issue.pull_request &&
-       contains(github.event.comment.body, '/claude split') &&
-       (github.event.comment.author_association == 'OWNER' ||
-        github.event.comment.author_association == 'MEMBER' ||
-        github.event.comment.author_association == 'COLLABORATOR'))
-
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-      issues: write
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - run: npm install -g @anthropic-ai/claude-code@latest
-      - uses: ./
-        with:
-          mode: split
-          auth-mode: max
-          oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          issue-number: ${{ github.event.issue.number }}
-          issue-title: ${{ github.event.issue.title }}
-          issue-body: ${{ github.event.issue.body }}
-          repo: ${{ github.repository }}
