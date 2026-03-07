@@ -131,6 +131,32 @@ Real-time updates in the issue comment: phase tracking, files touched, activity 
 
 ---
 
+## For Vibe Coders
+
+Just paste this into Claude Code, Cursor, or any AI coding assistant:
+
+```
+Add Issue2Claude to this repo. It's a GitHub Action that automatically solves
+GitHub Issues with Claude Code.
+
+1. Create .github/workflows/issue2claude.yml with this workflow:
+   - Trigger on issues labeled "claude-ready" and comments containing "claude-retry"
+   - Also trigger on PR comments containing "claude-fix" (for feedback) and "claude-rebase" (for conflicts)
+   - Also trigger on issue comments containing "/claude" (for slash commands)
+   - Use the action: lennystepn-hue/issue2claude@main
+   - Auth mode: max with oauth-token from secrets.CLAUDE_CODE_OAUTH_TOKEN
+   - Needs permissions: contents write, pull-requests write, issues write
+   - Needs: actions/checkout (fetch-depth 0), actions/setup-node (22), npm install -g @anthropic-ai/claude-code@latest
+
+2. Create .issue2claude.yml config with smart_model enabled and auto_review true
+
+See https://github.com/lennystepn-hue/issue2claude for full docs.
+```
+
+That's it. Your AI assistant sets up everything.
+
+---
+
 ## Authentication
 
 <table>
