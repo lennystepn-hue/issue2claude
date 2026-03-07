@@ -197,9 +197,25 @@ jobs:
 ```
 </details>
 
-### 3. Create an issue and label it
+### 3. Enable PR creation + create an issue
 
-That's it. Write an issue, add `claude-ready`, and watch the magic happen.
+**Important:** Go to your repo's **Settings > Actions > General > Workflow permissions** and enable:
+- **"Allow GitHub Actions to create and approve pull requests"**
+
+Then write an issue, add the `claude-ready` label, and watch the magic happen.
+
+---
+
+## Live Progress Updates
+
+While Claude is working, you'll see live updates directly in the issue comment:
+
+- **Phase tracking** — shows whether Claude is analyzing, implementing, or testing
+- **Files read & modified** — see exactly which files Claude is touching
+- **Recent activity log** — tool calls with timestamps
+- **Elapsed time & turn counter** — know how far along Claude is
+
+Updates refresh every ~30 seconds so you always know what's happening.
 
 ---
 
@@ -208,7 +224,7 @@ That's it. Write an issue, add `claude-ready`, and watch the magic happen.
 When Claude finishes, you get:
 
 **In the Issue:**
-- A start comment with status updates every 60s
+- A start comment with live status updates
 - A finish comment with the PR link, summary, cost, and duration
 
 **In the PR:**
@@ -225,8 +241,8 @@ When Claude finishes, you get:
 Optionally place `.issue2claude.yml` in your repo root:
 
 ```yaml
-# Model to use (default: claude-sonnet-4-6)
-model: claude-sonnet-4-6
+# Model to use (default: claude-opus-4-6)
+model: claude-opus-4-6
 
 # Label that triggers the bot
 trigger_label: claude-ready
@@ -274,7 +290,7 @@ Use the included issue template (`Claude Task`) for best results.
 |-----------|-------------|----------|
 | Simple fix (typo, config) | $0.02 - $0.10 | 1-2 min |
 | Small feature | $0.10 - $0.30 | 2-5 min |
-| Complex feature | $0.30 - $1.00 | 5-10 min |
+| Complex feature | $0.30 - $1.00 | 5-15 min |
 
 **Max/Pro mode:** Included in your subscription. No extra cost per issue.
 
@@ -309,6 +325,17 @@ issue2claude/
 - Restricted paths prevent Claude from touching sensitive files
 - Only repo owners, members, and collaborators can trigger retries
 - All changes go through a PR — nothing is pushed to main directly
+
+---
+
+## Troubleshooting
+
+| Error | Fix |
+|-------|-----|
+| "GitHub Actions is not permitted to create or approve pull requests" | Settings > Actions > General > Enable "Allow GitHub Actions to create and approve pull requests" |
+| "core is not defined" | Update to v0.2.0+ |
+| Claude hangs with no output | Check your OAuth token / API key is valid |
+| No changes detected | Claude couldn't figure out the fix — try a more detailed issue description |
 
 ---
 
