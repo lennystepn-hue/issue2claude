@@ -13,6 +13,8 @@ const { buildReviewPrompt, buildFixPrompt, parseReview } = require('./auto-revie
 const { parseSlashCommand, buildSlashCommandPrompt } = require('./slash-commands');
 const { parseDependencies, checkDependencies, findBaseBranch } = require('./pr-chain');
 const { buildConflictPrompt, getConflictFiles } = require('./pr-rebase');
+const { analyzeComplexity, pickModel } = require('./smart-model');
+const { readContext, learnFromRun } = require('./context-learning');
 
 function loadConfig() {
   const configPath = path.join(process.cwd(), '.issue2claude.yml');
@@ -420,6 +422,18 @@ async function runIssueMode({ octokit, owner, repo, issueNumber, issueTitle, iss
     core.setOutput('pr-url', pr.prUrl);
     core.setOutput('branch', pr.branchName);
 
+    // === Context Learning: extract patterns from this run ===
+    if (config.context_learning !== false) {
+      try {
+        const learned = await learnFromRun(summary, result.filesChanged || []);
+        if (learned) {
+          core.info(`Context learning: ${learned.facts}`);
+        }
+      } catch (e) {
+        core.warning(`Context learning failed (non-fatal): ${e.message}`);
+      }
+    }
+
   } catch (error) {
     core.error(`Issue2Claude failed: ${error.message}`);
     await updater.postErrorComment(error.message);
@@ -721,7 +735,20 @@ async function run() {
 
   const octokit = github.getOctokit(githubToken);
   const config = loadConfig();
-  const model = modelInput || config.model || 'claude-opus-4-6';
+  let model = modelInput || config.model || 'claude-opus-4-6';
+
+  // Smart Model Selection: auto-detect complexity and pick the right model
+  if (config.smart_model !== false && mode === 'issue' && !modelInput) {
+    const issueTitle = core.getInput('issue-title') || '';
+    const issueBody = core.getInput('issue-body') || '';
+    try {
+      const complexity = await analyzeComplexity(issueTitle, issueBody);
+      model = pickModel(complexity, config);
+      core.info(`Smart Model: complexity=${complexity}, using ${model}`);
+    } catch (e) {
+      core.warning(`Smart model selection failed: ${e.message}, using default`);
+    }
+  }
 
   if (mode === 'rebase') {
     const prNumber = parseInt(core.getInput('pr-number'), 10);

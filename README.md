@@ -114,6 +114,18 @@ Issue2Claude waits until `#12` is resolved. If `#12` has an open PR, the new bra
 
 Also supports: `depends on #12, #13`, `after #12`, `blocked-by: #15`
 
+### Smart Model Selection
+Claude auto-detects issue complexity and picks the right model:
+- **Simple** (typo, config, rename) → Sonnet (fast + cheap)
+- **Complex** (new feature, refactor) → Opus (best quality)
+
+Enabled by default. Override with `model` input or disable in config.
+
+### Context Learning
+After every successful PR, Claude extracts patterns from what it did and saves them to `.issue2claude-context.md` in your repo. Next time Claude runs, it reads this file and knows your codebase better.
+
+Over time it learns things like: *"Components use .tsx in src/components/"*, *"Tests use Vitest"*, *"API routes in src/app/api/"*
+
 ### Live Progress
 Real-time updates in the issue comment: phase tracking, files touched, activity log, elapsed time.
 
@@ -343,9 +355,15 @@ jobs:
 Optionally place `.issue2claude.yml` in your repo root:
 
 ```yaml
-model: claude-opus-4-6        # or claude-sonnet-4-6
+model: claude-opus-4-6        # or claude-sonnet-4-6 (overrides smart model)
 auto_review: true              # second Claude pass before PR (default: true)
+context_learning: true         # learn patterns after each run (default: true)
 trigger_label: claude-ready
+
+# Smart model: auto-pick based on complexity (default: enabled)
+smart_model:
+  simple: claude-sonnet-4-6   # for typos, config changes
+  complex: claude-opus-4-6    # for new features, refactors
 
 restricted_paths:              # files Claude cannot touch
   - ".env*"
