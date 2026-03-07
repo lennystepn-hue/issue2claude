@@ -100,7 +100,7 @@ async function runClaude(prompt, model, updater) {
       `|---|---|`,
       `| **Phase** | ${phaseLabels[phase] || phase} |`,
       `| **Elapsed** | ${timeStr} |`,
-      `| **Turns** | ${turnCount} / 200 |`,
+      `| **Turns** | ${turnCount} / 3000 |`,
       `| **Events** | ${eventCount} |`,
     ];
 
@@ -141,7 +141,7 @@ async function runClaude(prompt, model, updater) {
 
   return new Promise((resolve, reject) => {
     // Use shell to read prompt from file
-    const child = spawn('bash', ['-c', `cat "${promptFile}" | claude -p - --allowedTools Read,Write,Edit,Bash,Glob,Grep --max-turns 200 --output-format stream-json --verbose --model ${model} --dangerously-skip-permissions`], {
+    const child = spawn('bash', ['-c', `cat "${promptFile}" | claude -p - --allowedTools Read,Write,Edit,Bash,Glob,Grep --max-turns 3000 --output-format stream-json --verbose --model ${model} --dangerously-skip-permissions`], {
       env: { ...process.env },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
