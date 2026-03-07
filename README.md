@@ -71,7 +71,7 @@ Claude Code reads your issue, analyzes your codebase, implements the fix, and op
 <tr>
 <td><strong>Setup</strong></td>
 <td>Add <code>ANTHROPIC_API_KEY</code> secret</td>
-<td>Add <code>CLAUDE_OAUTH_TOKEN</code> secret</td>
+<td>Add <code>CLAUDE_CODE_OAUTH_TOKEN</code> secret</td>
 </tr>
 <tr>
 <td><strong>Best for</strong></td>
@@ -82,15 +82,12 @@ Claude Code reads your issue, analyzes your codebase, implements the fix, and op
 
 **API Key mode:** Get your key from [console.anthropic.com](https://console.anthropic.com/) and add it as `ANTHROPIC_API_KEY` in repo secrets.
 
-**Max/Pro mode:** Extract your OAuth token:
+**Max/Pro mode:** Generate a long-lived OAuth token:
 ```bash
-# Login locally (if not already)
-claude login
-
-# Copy the token
-cat ~/.claude/.credentials.json
+# Generate a token (valid for 1 year)
+claude setup-token
 ```
-Add the full JSON content as `CLAUDE_OAUTH_TOKEN` in repo secrets.
+Copy the token (`sk-ant-oat01-...`) and add it as `CLAUDE_CODE_OAUTH_TOKEN` in repo secrets.
 
 ### 2. Add the workflow
 
@@ -191,7 +188,7 @@ jobs:
       - uses: lennystepn-hue/issue2claude@main
         with:
           auth-mode: max
-          oauth-token: ${{ secrets.CLAUDE_OAUTH_TOKEN }}
+          oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           issue-number: ${{ github.event.issue.number || github.event.comment.issue_number }}
           issue-title: ${{ github.event.issue.title }}

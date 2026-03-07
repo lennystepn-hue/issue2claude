@@ -342,32 +342,35 @@ async function run() {
       return;
     }
     // Set up OAuth for Claude Code in CI
-    const claudeDir = path.join(process.env.HOME || '/root', '.claude');
-    fs.mkdirSync(claudeDir, { recursive: true });
+    // The correct env var is CLAUDE_CODE_OAUTH_TOKEN
+    // Token format: either a plain sk-ant-oat01-xxx token (from `claude setup-token`)
+    // or the full credentials JSON (from ~/.claude/.credentials.json)
 
-    // Try to extract the access token from full credentials JSON
-    let accessToken = oauthToken;
+    let token = oauthToken;
     try {
       const parsed = JSON.parse(oauthToken);
       if (parsed.claudeAiOauth?.accessToken) {
-        accessToken = parsed.claudeAiOauth.accessToken;
+        token = parsed.claudeAiOauth.accessToken;
       }
-      // Write full credentials file
-      fs.writeFileSync(path.join(claudeDir, '.credentials.json'), oauthToken);
     } catch {
-      // Plain token — build credentials structure
-      fs.writeFileSync(path.join(claudeDir, '.credentials.json'), JSON.stringify({
-        claudeAiOauth: { accessToken: oauthToken },
+      // Already a plain token string — use as-is
+    }
+
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = token;
+
+    // Also write ~/.claude.json to skip onboarding
+    const claudeDir = path.join(process.env.HOME || '/root', '.claude');
+    fs.mkdirSync(claudeDir, { recursive: true });
+    const claudeJsonPath = path.join(claudeDir, 'claude.json');
+    if (!fs.existsSync(claudeJsonPath)) {
+      fs.writeFileSync(claudeJsonPath, JSON.stringify({
+        completedOnboarding: true,
+        hasBeenLoggedIn: true,
       }));
     }
 
-    // Also set env vars that Claude Code may check
-    process.env.ANTHROPIC_AUTH_TOKEN = accessToken;
-    process.env.CLAUDE_ACCESS_TOKEN = accessToken;
-
     core.info('Auth mode: Claude Max/Pro (OAuth)');
-    core.info(`Credentials written to ${claudeDir}/.credentials.json`);
-    core.info(`Access token set (${accessToken.slice(0, 15)}...)`);
+    core.info(`CLAUDE_CODE_OAUTH_TOKEN set (${token.slice(0, 20)}...)`);
   } else {
     if (!apiKey) {
       core.setFailed('anthropic-api-key is required when auth-mode is "api-key"');
@@ -393,15 +396,9 @@ async function run() {
       core.error(`Claude Code not found or broken: ${e.message}`);
     }
 
-    // Debug: check credentials file
-    const credPath = path.join(process.env.HOME || '/root', '.claude', '.credentials.json');
-    if (fs.existsSync(credPath)) {
-      const creds = JSON.parse(fs.readFileSync(credPath, 'utf-8'));
-      const hasOauth = !!creds.claudeAiOauth?.accessToken;
-      core.info(`Credentials file exists. Has OAuth token: ${hasOauth}`);
-    } else {
-      core.warning('No credentials file found!');
-    }
+    // Debug: verify auth setup
+    core.info(`CLAUDE_CODE_OAUTH_TOKEN is set: ${!!process.env.CLAUDE_CODE_OAUTH_TOKEN}`);
+    core.info(`ANTHROPIC_API_KEY is set: ${!!process.env.ANTHROPIC_API_KEY}`);
 
     // Step 1: Post start comment
     core.info(`Starting Issue2Claude for issue #${issueNumber}`);

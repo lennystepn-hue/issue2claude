@@ -54,7 +54,7 @@ jobs:
         uses: ./
         with:
           auth-mode: max
-          oauth-token: ${{ secrets.CLAUDE_OAUTH_TOKEN }}
+          oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           issue-number: ${{ github.event.issue.number || github.event.comment.issue_number }}
           issue-title: ${{ github.event.issue.title }}
