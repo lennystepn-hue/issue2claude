@@ -1,6 +1,10 @@
 name: 'Issue2Claude'
-description: 'Automatically solve GitHub Issues with Claude Code'
-author: 'issue2claude'
+description: 'Automatically solve GitHub Issues with Claude Code — label an issue, get a PR'
+author: 'lennystepn-hue'
+
+branding:
+  icon: 'cpu'
+  color: 'orange'
 
 inputs:
   anthropic-api-key:
