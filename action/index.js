@@ -113,7 +113,9 @@ async function runClaude(prompt, model, updater) {
 }
 
 async function run() {
-  const apiKey = core.getInput('anthropic-api-key', { required: true });
+  const authMode = core.getInput('auth-mode') || 'api-key';
+  const apiKey = core.getInput('anthropic-api-key');
+  const oauthToken = core.getInput('oauth-token');
   const githubToken = core.getInput('github-token', { required: true });
   const issueNumber = parseInt(core.getInput('issue-number', { required: true }), 10);
   const issueTitle = core.getInput('issue-title', { required: true });
@@ -123,8 +125,28 @@ async function run() {
 
   const [owner, repo] = repoFull.split('/');
 
-  // Set API key for Claude
-  process.env.ANTHROPIC_API_KEY = apiKey;
+  // Set auth based on mode
+  if (authMode === 'max' || authMode === 'oauth') {
+    if (!oauthToken) {
+      core.setFailed('oauth-token is required when auth-mode is "max"');
+      return;
+    }
+    // Write credentials file so Claude Code picks up the OAuth session
+    const claudeDir = path.join(process.env.HOME || '/root', '.claude');
+    fs.mkdirSync(claudeDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(claudeDir, '.credentials.json'),
+      JSON.stringify({ oauthToken }),
+    );
+    core.info('Auth mode: Claude Max/Pro (OAuth)');
+  } else {
+    if (!apiKey) {
+      core.setFailed('anthropic-api-key is required when auth-mode is "api-key"');
+      return;
+    }
+    process.env.ANTHROPIC_API_KEY = apiKey;
+    core.info('Auth mode: API Key');
+  }
   process.env.GITHUB_TOKEN = githubToken;
 
   const octokit = github.getOctokit(githubToken);

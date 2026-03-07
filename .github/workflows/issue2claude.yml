@@ -37,10 +37,24 @@ jobs:
       - name: Install Claude Code
         run: npm install -g @anthropic-ai/claude-code@latest
 
+      # Option A: API Key (pay per use)
+      # - name: Run Issue2Claude (API Key)
+      #   uses: ./
+      #   with:
+      #     auth-mode: api-key
+      #     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+      #     github-token: ${{ secrets.GITHUB_TOKEN }}
+      #     issue-number: ${{ github.event.issue.number || github.event.comment.issue_number }}
+      #     issue-title: ${{ github.event.issue.title }}
+      #     issue-body: ${{ github.event.issue.body }}
+      #     repo: ${{ github.repository }}
+
+      # Option B: Claude Max/Pro (subscription, no extra cost)
       - name: Run Issue2Claude
         uses: ./
         with:
-          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          auth-mode: max
+          oauth-token: ${{ secrets.CLAUDE_OAUTH_TOKEN }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           issue-number: ${{ github.event.issue.number || github.event.comment.issue_number }}
           issue-title: ${{ github.event.issue.title }}

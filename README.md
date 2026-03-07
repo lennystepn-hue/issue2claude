@@ -57,19 +57,47 @@ Claude Code reads your issue, analyzes your codebase, implements the fix, and op
 
 ## Quick Start
 
-**3 steps. 2 minutes. Zero config.**
+**3 steps. 2 minutes. Pick your auth mode.**
 
-### 1. Add your API key
+### 1. Choose your authentication
 
-Go to your repo `Settings > Secrets and variables > Actions` and add:
+<table>
+<tr><th></th><th>API Key (pay per use)</th><th>Claude Max/Pro (subscription)</th></tr>
+<tr>
+<td><strong>Cost</strong></td>
+<td>~$0.02–$1.00 per issue</td>
+<td>Included in your subscription</td>
+</tr>
+<tr>
+<td><strong>Setup</strong></td>
+<td>Add <code>ANTHROPIC_API_KEY</code> secret</td>
+<td>Add <code>CLAUDE_OAUTH_TOKEN</code> secret</td>
+</tr>
+<tr>
+<td><strong>Best for</strong></td>
+<td>Teams, heavy usage</td>
+<td>Solo devs with Max/Pro plan</td>
+</tr>
+</table>
 
-| Secret | Value |
-|--------|-------|
-| `ANTHROPIC_API_KEY` | Your [Anthropic API key](https://console.anthropic.com/) |
+**API Key mode:** Get your key from [console.anthropic.com](https://console.anthropic.com/) and add it as `ANTHROPIC_API_KEY` in repo secrets.
+
+**Max/Pro mode:** Extract your OAuth token:
+```bash
+# Login locally (if not already)
+claude login
+
+# Copy the token
+cat ~/.claude/.credentials.json
+```
+Add the full JSON content as `CLAUDE_OAUTH_TOKEN` in repo secrets.
 
 ### 2. Add the workflow
 
 Create `.github/workflows/issue2claude.yml`:
+
+<details>
+<summary><strong>API Key mode</strong> (click to expand)</summary>
 
 ```yaml
 name: Issue2Claude
@@ -110,6 +138,7 @@ jobs:
 
       - uses: lennystepn-hue/issue2claude@main
         with:
+          auth-mode: api-key
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           issue-number: ${{ github.event.issue.number || github.event.comment.issue_number }}
@@ -117,6 +146,59 @@ jobs:
           issue-body: ${{ github.event.issue.body }}
           repo: ${{ github.repository }}
 ```
+</details>
+
+<details open>
+<summary><strong>Claude Max/Pro mode</strong> (click to expand)</summary>
+
+```yaml
+name: Issue2Claude
+
+on:
+  issues:
+    types: [labeled]
+  issue_comment:
+    types: [created]
+
+jobs:
+  solve-issue:
+    if: |
+      (github.event_name == 'issues' && github.event.label.name == 'claude-ready') ||
+      (github.event_name == 'issue_comment' &&
+       contains(github.event.comment.body, 'claude-retry') &&
+       (github.event.comment.author_association == 'OWNER' ||
+        github.event.comment.author_association == 'MEMBER' ||
+        github.event.comment.author_association == 'COLLABORATOR'))
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - run: npm install -g @anthropic-ai/claude-code@latest
+
+      - uses: lennystepn-hue/issue2claude@main
+        with:
+          auth-mode: max
+          oauth-token: ${{ secrets.CLAUDE_OAUTH_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ github.event.issue.number || github.event.comment.issue_number }}
+          issue-title: ${{ github.event.issue.title }}
+          issue-body: ${{ github.event.issue.body }}
+          repo: ${{ github.repository }}
+```
+</details>
 
 ### 3. Create an issue and label it
 
@@ -189,13 +271,15 @@ Use the included issue template (`Claude Task`) for best results.
 
 ## Cost
 
-Usage is billed to your Anthropic API key.
+**API Key mode:** Usage is billed to your Anthropic API key.
 
 | Complexity | Typical Cost | Duration |
 |-----------|-------------|----------|
 | Simple fix (typo, config) | $0.02 - $0.10 | 1-2 min |
 | Small feature | $0.10 - $0.30 | 2-5 min |
 | Complex feature | $0.30 - $1.00 | 5-10 min |
+
+**Max/Pro mode:** Included in your subscription. No extra cost per issue.
 
 Costs are shown in every PR and issue comment so there are no surprises.
 

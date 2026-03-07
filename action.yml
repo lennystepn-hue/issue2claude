@@ -4,11 +4,20 @@ author: 'issue2claude'
 
 inputs:
   anthropic-api-key:
-    description: 'Anthropic API Key'
-    required: true
+    description: 'Anthropic API Key (required for api-key mode)'
+    required: false
+    default: ''
   github-token:
     description: 'GitHub Token'
     required: true
+  auth-mode:
+    description: 'Authentication mode: "api-key" or "max" (Claude Max/Pro subscription)'
+    required: false
+    default: 'api-key'
+  oauth-token:
+    description: 'Claude OAuth token from ~/.claude/.credentials.json (required for max mode)'
+    required: false
+    default: ''
   issue-number:
     description: 'Issue number to solve'
     required: true
