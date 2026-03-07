@@ -292,6 +292,50 @@ Claude: *applies all feedback, pushes to branch*
 
 ---
 
+## Slash Commands
+
+Comment on any issue to trigger Claude without creating a PR:
+
+| Command | What it does |
+|---------|-------------|
+| `/claude estimate` | Analyzes the codebase and estimates effort, affected files, and approach |
+| `/claude explain` | Explains the relevant code without making changes |
+| `/claude test` | Writes tests only — no implementation changes |
+| `/claude refactor` | Refactors code without changing behavior |
+| `/claude split` | Splits a complex issue into 2-5 smaller sub-issues (auto-labeled `claude-ready`) |
+
+`estimate` and `explain` only post a comment. `test` and `refactor` create a PR with the changes.
+
+---
+
+## Auto-Review
+
+Every PR gets automatically reviewed before it's created:
+
+1. Claude implements the solution
+2. A second Claude pass reviews the code for bugs, security issues, edge cases
+3. If issues are found, Claude fixes them automatically
+4. Only then the PR is created
+
+This means fewer review cycles for you. Can be disabled in `.issue2claude.yml`:
+
+```yaml
+auto_review: false
+```
+
+---
+
+## Issue Splitting
+
+Got a big issue? Label it **`claude-split`** or comment `/claude split`:
+
+1. Claude analyzes the issue and the codebase
+2. Creates 2-5 smaller, independent sub-issues
+3. Each sub-issue is auto-labeled `claude-ready`
+4. Claude picks them up one by one
+
+---
+
 ## Live Progress Updates
 
 While Claude is working, you'll see live updates directly in the issue comment:
@@ -332,6 +376,9 @@ model: claude-opus-4-6
 
 # Label that triggers the bot
 trigger_label: claude-ready
+
+# Auto-review before PR creation (default: true)
+auto_review: true
 
 # Files Claude is NOT allowed to touch
 restricted_paths:
@@ -392,6 +439,10 @@ issue2claude/
 │   ├── index.js              # Orchestrator — runs the full pipeline
 │   ├── prompt-builder.js     # Builds Claude prompt from issue data
 │   ├── pr-creator.js         # Creates branch, commit, and PR
+│   ├── pr-feedback.js        # Handles claude-fix PR feedback loop
+│   ├── auto-review.js        # Auto-reviews code before PR creation
+│   ├── slash-commands.js     # /claude estimate, explain, test, refactor
+│   ├── issue-splitter.js     # Splits large issues into sub-tasks
 │   └── issue-updater.js      # Posts live updates to the issue
 ├── .github/
 │   ├── workflows/

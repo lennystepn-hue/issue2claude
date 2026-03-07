@@ -9,6 +9,9 @@ const { buildPrompt, readFileIfExists } = require('./prompt-builder');
 const { IssueUpdater } = require('./issue-updater');
 const { createPR } = require('./pr-creator');
 const { fetchPRContext, buildFeedbackPrompt } = require('./pr-feedback');
+const { buildReviewPrompt, buildFixPrompt, parseReview } = require('./auto-review');
+const { parseSlashCommand, buildSlashCommandPrompt } = require('./slash-commands');
+const { buildSplitPrompt, parseSplitResult } = require('./issue-splitter');
 
 function loadConfig() {
   const configPath = path.join(process.cwd(), '.issue2claude.yml');
@@ -51,7 +54,7 @@ function describeToolUse(toolName, toolInput) {
   }
 }
 
-async function runClaude(prompt, model, updater) {
+async function runClaude(prompt, model, updater, options = {}) {
   const startTime = Date.now();
   const activities = [];
   const filesChanged = new Set();
@@ -142,7 +145,9 @@ async function runClaude(prompt, model, updater) {
 
   return new Promise((resolve, reject) => {
     // Use shell to read prompt from file
-    const child = spawn('bash', ['-c', `cat "${promptFile}" | claude -p - --allowedTools Read,Write,Edit,Bash,Glob,Grep --max-turns 3000 --output-format stream-json --verbose --model ${model} --dangerously-skip-permissions`], {
+    const allowedTools = options.allowedTools || 'Read,Write,Edit,Bash,Glob,Grep';
+    const maxTurns = options.maxTurns || 3000;
+    const child = spawn('bash', ['-c', `cat "${promptFile}" | claude -p - --allowedTools ${allowedTools} --max-turns ${maxTurns} --output-format stream-json --verbose --model ${model} --dangerously-skip-permissions`], {
       env: { ...process.env },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -314,8 +319,45 @@ async function runIssueMode({ octokit, owner, repo, issueNumber, issueTitle, iss
       return;
     }
 
+    // === Auto-Review Phase ===
+    const autoReview = config.auto_review !== false; // enabled by default
+    let reviewNote = '';
+    if (autoReview) {
+      core.info('Starting auto-review phase...');
+      try {
+        const changedFilesList = execSync('git diff --name-only', { encoding: 'utf-8' }).trim().split('\n').filter(Boolean);
+        if (changedFilesList.length === 0) {
+          // Check staged files
+          const stagedFiles = execSync('git diff --cached --name-only', { encoding: 'utf-8' }).trim().split('\n').filter(Boolean);
+          changedFilesList.push(...stagedFiles);
+        }
+
+        const reviewPrompt = buildReviewPrompt(changedFilesList);
+        const reviewResult = await runClaude(reviewPrompt, model, updater, { allowedTools: 'Read,Glob,Grep,Bash', maxTurns: 50 });
+        const { hasIssues, review } = parseReview(reviewResult.output);
+
+        if (hasIssues && review) {
+          core.info('Auto-review found issues, running fix pass...');
+          reviewNote = `\n\n**Auto-Review:** Issues found and fixed automatically.`;
+
+          const fixPrompt = buildFixPrompt(review);
+          await runClaude(fixPrompt, model, updater, { maxTurns: 100 });
+
+          // Re-check git status after fix
+          gitStatus = execSync('git status --porcelain').toString().trim();
+          core.info('Fix pass completed.');
+        } else {
+          core.info('Auto-review passed — no issues found.');
+          reviewNote = '\n\n**Auto-Review:** Passed — no issues found.';
+        }
+      } catch (e) {
+        core.warning(`Auto-review failed (non-fatal): ${e.message}`);
+        reviewNote = '\n\n**Auto-Review:** Skipped (error during review).';
+      }
+    }
+
     core.info('Changes detected, creating PR...');
-    const summary = parseSummary(result.output) || 'Claude made changes but did not provide a structured summary.';
+    const summary = (parseSummary(result.output) || 'Claude made changes but did not provide a structured summary.') + reviewNote;
 
     const pr = await createPR({
       octokit, owner, repo, issueNumber, issueTitle, summary, model,
@@ -437,6 +479,156 @@ async function runPRFeedbackMode({ octokit, owner, repo, prNumber, model, config
   }
 }
 
+async function runSlashCommandMode({ octokit, owner, repo, issueNumber, issueTitle, issueBody, command, model, config }) {
+  const updater = new IssueUpdater(octokit, owner, repo, issueNumber);
+
+  try {
+    core.info(`Running slash command: /claude ${command} on issue #${issueNumber}`);
+
+    const cmdResult = buildSlashCommandPrompt({ command, issueTitle, issueBody });
+    if (!cmdResult) {
+      core.setFailed(`Unknown slash command: ${command}`);
+      return;
+    }
+
+    await octokit.rest.issues.createComment({
+      owner, repo, issue_number: issueNumber,
+      body: `**Issue2Claude** — Running \`/claude ${command}\`\n\n_${cmdResult.description}_\n\n\`Model: ${model}\``,
+    });
+
+    const result = await runClaude(cmdResult.prompt, model, updater, {
+      allowedTools: cmdResult.allowedTools,
+      maxTurns: command === 'estimate' || command === 'explain' ? 100 : 3000,
+    });
+
+    const summary = parseSummary(result.output) || result.output.slice(0, 2000);
+    const durationMin = Math.round(result.duration / 60000);
+
+    // For estimate/explain: just post result as comment (no PR)
+    if (command === 'estimate' || command === 'explain') {
+      await octokit.rest.issues.createComment({
+        owner, repo, issue_number: issueNumber,
+        body: [
+          `**Issue2Claude — \`/claude ${command}\` result**`,
+          '',
+          summary,
+          '',
+          `**Duration:** ${durationMin}min`,
+        ].join('\n'),
+      });
+      return;
+    }
+
+    // For test/refactor: check for changes and create PR
+    let gitStatus = execSync('git status --porcelain').toString().trim();
+    const newCommits = execSync('git log --oneline HEAD --not --remotes 2>/dev/null || echo ""', { encoding: 'utf-8' }).trim();
+
+    if (!gitStatus && newCommits) {
+      const baseCommit = execSync('git merge-base HEAD origin/HEAD 2>/dev/null || git rev-parse HEAD~1', { encoding: 'utf-8' }).trim();
+      execSync(`git reset --soft ${baseCommit}`);
+      gitStatus = execSync('git status --porcelain').toString().trim();
+    }
+
+    if (!gitStatus) {
+      await octokit.rest.issues.createComment({
+        owner, repo, issue_number: issueNumber,
+        body: `**Issue2Claude — \`/claude ${command}\`**\n\nNo changes were needed.\n\n${summary}`,
+      });
+      return;
+    }
+
+    const pr = await createPR({
+      octokit, owner, repo, issueNumber,
+      issueTitle: `${command}: ${issueTitle}`,
+      summary, model,
+      cost: result.cost ? result.cost.toFixed(2) : null,
+      duration: result.duration,
+      tokens: result.turns ? `${result.turns} turns` : null,
+    });
+
+    await octokit.rest.issues.createComment({
+      owner, repo, issue_number: issueNumber,
+      body: [
+        `**Issue2Claude — \`/claude ${command}\` done!**`,
+        '',
+        `PR opened: #${pr.prNumber}`,
+        '',
+        summary,
+        '',
+        `**Duration:** ${durationMin}min`,
+      ].join('\n'),
+    });
+
+  } catch (error) {
+    core.error(`Slash command failed: ${error.message}`);
+    await octokit.rest.issues.createComment({
+      owner, repo, issue_number: issueNumber,
+      body: `**Issue2Claude — Error running \`/claude ${command}\`**\n\n${error.message}`,
+    });
+    core.setFailed(error.message);
+  }
+}
+
+async function runSplitMode({ octokit, owner, repo, issueNumber, issueTitle, issueBody, model, config }) {
+  const updater = new IssueUpdater(octokit, owner, repo, issueNumber);
+
+  try {
+    core.info(`Running issue split on #${issueNumber}`);
+
+    await octokit.rest.issues.createComment({
+      owner, repo, issue_number: issueNumber,
+      body: `**Issue2Claude** — Analyzing issue to split into sub-tasks...\n\n\`Model: ${model}\``,
+    });
+
+    const prompt = buildSplitPrompt({ issueTitle, issueBody });
+    const result = await runClaude(prompt, model, updater, { allowedTools: 'Read,Glob,Grep,Bash', maxTurns: 100 });
+
+    const subIssues = parseSplitResult(result.output, issueNumber);
+
+    if (subIssues.length === 0) {
+      await octokit.rest.issues.createComment({
+        owner, repo, issue_number: issueNumber,
+        body: '**Issue2Claude — Split result**\n\nThis issue is small enough to be solved as a single task. No split needed.',
+      });
+      return;
+    }
+
+    // Create sub-issues
+    const createdIssues = [];
+    for (const sub of subIssues) {
+      const { data } = await octokit.rest.issues.create({
+        owner, repo,
+        title: sub.title,
+        body: sub.body,
+        labels: ['claude-ready'],
+      });
+      createdIssues.push({ number: data.number, title: data.title });
+      core.info(`Created sub-issue #${data.number}: ${data.title}`);
+    }
+
+    // Post summary on parent issue
+    const issueList = createdIssues.map(i => `- #${i.number} — ${i.title}`).join('\n');
+    await octokit.rest.issues.createComment({
+      owner, repo, issue_number: issueNumber,
+      body: [
+        `**Issue2Claude — Split into ${createdIssues.length} sub-issues**`,
+        '',
+        issueList,
+        '',
+        'Each sub-issue has been labeled `claude-ready` and will be picked up automatically.',
+      ].join('\n'),
+    });
+
+  } catch (error) {
+    core.error(`Issue split failed: ${error.message}`);
+    await octokit.rest.issues.createComment({
+      owner, repo, issue_number: issueNumber,
+      body: `**Issue2Claude — Error splitting issue**\n\n${error.message}`,
+    });
+    core.setFailed(error.message);
+  }
+}
+
 async function run() {
   const authMode = core.getInput('auth-mode') || 'api-key';
   const apiKey = core.getInput('anthropic-api-key');
@@ -462,6 +654,25 @@ async function run() {
       return;
     }
     await runPRFeedbackMode({ octokit, owner, repo, prNumber, model, config });
+  } else if (mode === 'slash-command') {
+    const issueNumber = parseInt(core.getInput('issue-number'), 10);
+    const issueTitle = core.getInput('issue-title');
+    const issueBody = core.getInput('issue-body');
+    const commentBody = core.getInput('comment-body') || '';
+    const command = parseSlashCommand(commentBody);
+
+    if (!command) {
+      core.info('No valid slash command found, skipping.');
+      return;
+    }
+
+    await runSlashCommandMode({ octokit, owner, repo, issueNumber, issueTitle, issueBody, command, model, config });
+  } else if (mode === 'split') {
+    const issueNumber = parseInt(core.getInput('issue-number'), 10);
+    const issueTitle = core.getInput('issue-title');
+    const issueBody = core.getInput('issue-body');
+
+    await runSplitMode({ octokit, owner, repo, issueNumber, issueTitle, issueBody, model, config });
   } else {
     const issueNumber = parseInt(core.getInput('issue-number'), 10);
     const issueTitle = core.getInput('issue-title');
