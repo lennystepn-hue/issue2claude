@@ -1,0 +1,48 @@
+name: Issue2Claude
+
+on:
+  issues:
+    types: [labeled]
+  issue_comment:
+    types: [created]
+
+jobs:
+  solve-issue:
+    if: |
+      (github.event_name == 'issues' && github.event.label.name == 'claude-ready') ||
+      (github.event_name == 'issue_comment' &&
+       contains(github.event.comment.body, 'claude-retry') &&
+       (github.event.comment.author_association == 'OWNER' ||
+        github.event.comment.author_association == 'MEMBER' ||
+        github.event.comment.author_association == 'COLLABORATOR'))
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code@latest
+
+      - name: Run Issue2Claude
+        uses: ./
+        with:
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ github.event.issue.number || github.event.comment.issue_number }}
+          issue-title: ${{ github.event.issue.title }}
+          issue-body: ${{ github.event.issue.body }}
+          repo: ${{ github.repository }}

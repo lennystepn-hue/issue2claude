@@ -1,0 +1,114 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 300" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a1a2e"/>
+      <stop offset="50%" style="stop-color:#16213e"/>
+      <stop offset="100%" style="stop-color:#0f3460"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#cc785c"/>
+      <stop offset="100%" style="stop-color:#e8a87c"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#cc785c;stop-opacity:0.3"/>
+      <stop offset="100%" style="stop-color:#cc785c;stop-opacity:0"/>
+    </linearGradient>
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#000" flood-opacity="0.3"/>
+    </filter>
+    <filter id="textglow">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="300" rx="12" fill="url(#bg)"/>
+
+  <!-- Subtle grid pattern -->
+  <g opacity="0.05" stroke="#fff" stroke-width="0.5">
+    <line x1="0" y1="50" x2="1200" y2="50"/>
+    <line x1="0" y1="100" x2="1200" y2="100"/>
+    <line x1="0" y1="150" x2="1200" y2="150"/>
+    <line x1="0" y1="200" x2="1200" y2="200"/>
+    <line x1="0" y1="250" x2="1200" y2="250"/>
+    <line x1="100" y1="0" x2="100" y2="300"/>
+    <line x1="200" y1="0" x2="200" y2="300"/>
+    <line x1="300" y1="0" x2="300" y2="300"/>
+    <line x1="400" y1="0" x2="400" y2="300"/>
+    <line x1="500" y1="0" x2="500" y2="300"/>
+    <line x1="600" y1="0" x2="600" y2="300"/>
+    <line x1="700" y1="0" x2="700" y2="300"/>
+    <line x1="800" y1="0" x2="800" y2="300"/>
+    <line x1="900" y1="0" x2="900" y2="300"/>
+    <line x1="1000" y1="0" x2="1000" y2="300"/>
+    <line x1="1100" y1="0" x2="1100" y2="300"/>
+  </g>
+
+  <!-- Decorative circles -->
+  <circle cx="950" cy="80" r="120" fill="url(#glow)" opacity="0.4"/>
+  <circle cx="1050" cy="200" r="80" fill="url(#glow)" opacity="0.3"/>
+
+  <!-- Issue icon (left side) -->
+  <g transform="translate(80, 90)" filter="url(#shadow)">
+    <!-- Issue circle -->
+    <circle cx="50" cy="60" r="48" stroke="url(#accent)" stroke-width="3" fill="none"/>
+    <circle cx="50" cy="45" r="5" fill="#cc785c"/>
+    <rect x="47" y="58" width="6" height="25" rx="3" fill="#cc785c"/>
+  </g>
+
+  <!-- Arrow -->
+  <g transform="translate(200, 135)" opacity="0.6">
+    <line x1="0" y1="15" x2="80" y2="15" stroke="url(#accent)" stroke-width="2" stroke-dasharray="6,4"/>
+    <polygon points="80,8 95,15 80,22" fill="#cc785c"/>
+  </g>
+
+  <!-- Claude sparkle icon -->
+  <g transform="translate(310, 100)" filter="url(#shadow)">
+    <path d="M40 0 L48 28 L76 36 L48 44 L40 72 L32 44 L4 36 L32 28 Z" fill="url(#accent)" opacity="0.9"/>
+    <path d="M65 50 L69 62 L81 66 L69 70 L65 82 L61 70 L49 66 L61 62 Z" fill="#e8a87c" opacity="0.7"/>
+  </g>
+
+  <!-- Arrow -->
+  <g transform="translate(410, 135)" opacity="0.6">
+    <line x1="0" y1="15" x2="80" y2="15" stroke="url(#accent)" stroke-width="2" stroke-dasharray="6,4"/>
+    <polygon points="80,8 95,15 80,22" fill="#cc785c"/>
+  </g>
+
+  <!-- PR icon -->
+  <g transform="translate(520, 95)" filter="url(#shadow)">
+    <circle cx="15" cy="15" r="10" stroke="#4ade80" stroke-width="2.5" fill="none"/>
+    <circle cx="15" cy="65" r="10" stroke="#4ade80" stroke-width="2.5" fill="none"/>
+    <circle cx="55" cy="30" r="10" stroke="#4ade80" stroke-width="2.5" fill="none"/>
+    <line x1="15" y1="25" x2="15" y2="55" stroke="#4ade80" stroke-width="2.5"/>
+    <path d="M25 15 Q40 15 48 23" stroke="#4ade80" stroke-width="2.5" fill="none"/>
+  </g>
+
+  <!-- Main title -->
+  <text x="650" y="125" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="64" font-weight="800" fill="#ffffff" filter="url(#textglow)">
+    Issue<tspan fill="url(#accent)">2</tspan>Claude
+  </text>
+
+  <!-- Subtitle -->
+  <text x="650" y="170" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="20" fill="#94a3b8" font-weight="400">
+    Label an issue. Get a pull request.
+  </text>
+
+  <!-- Tags -->
+  <g transform="translate(650, 195)">
+    <rect x="0" y="0" width="130" height="28" rx="14" fill="#cc785c" opacity="0.15"/>
+    <text x="65" y="19" font-family="monospace" font-size="12" fill="#cc785c" text-anchor="middle" font-weight="600">Claude Code</text>
+
+    <rect x="145" y="0" width="140" height="28" rx="14" fill="#3b82f6" opacity="0.15"/>
+    <text x="215" y="19" font-family="monospace" font-size="12" fill="#60a5fa" text-anchor="middle" font-weight="600">GitHub Actions</text>
+
+    <rect x="300" y="0" width="120" height="28" rx="14" fill="#4ade80" opacity="0.15"/>
+    <text x="360" y="19" font-family="monospace" font-size="12" fill="#4ade80" text-anchor="middle" font-weight="600">Autonomous</text>
+  </g>
+
+  <!-- Bottom accent line -->
+  <rect x="0" y="292" width="1200" height="8" rx="0" fill="url(#accent)" opacity="0.8"/>
+</svg>

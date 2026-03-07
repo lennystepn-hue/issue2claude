@@ -1,0 +1,30 @@
+name: 'Issue2Claude'
+description: 'Automatically solve GitHub Issues with Claude Code'
+author: 'issue2claude'
+
+inputs:
+  anthropic-api-key:
+    description: 'Anthropic API Key'
+    required: true
+  github-token:
+    description: 'GitHub Token'
+    required: true
+  issue-number:
+    description: 'Issue number to solve'
+    required: true
+  issue-title:
+    description: 'Issue title'
+    required: true
+  issue-body:
+    description: 'Issue body/description'
+    required: true
+  repo:
+    description: 'Repository (owner/name)'
+    required: true
+  model:
+    description: 'Claude model to use'
+    default: 'claude-sonnet-4-6'
+
+runs:
+  using: 'node20'
+  main: 'action/index.js'

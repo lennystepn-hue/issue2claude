@@ -1,0 +1,22 @@
+# Issue2Claude configuration
+# Place this file in your repo root to configure Issue2Claude
+
+model: claude-sonnet-4-6
+
+# Label that triggers the bot
+trigger_label: claude-ready
+
+# Files Claude is NOT allowed to touch
+restricted_paths:
+  - ".env*"
+  - "secrets/"
+  - "*.key"
+  - "*.pem"
+
+# Additional context files Claude should read
+context_files:
+  - "ARCHITECTURE.md"
+  - "docs/conventions.md"
+
+# Branch naming
+branch_prefix: "issue2claude"
