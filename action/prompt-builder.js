@@ -68,8 +68,8 @@ ${additionalContext}
 ${restrictedSection}
 - When in doubt, make the smallest possible change
 - Write code comments in English
-- If you cannot fully solve the issue: still commit what you have
-  and explain in the commit message what is missing
+- Do NOT run git add, git commit, or git push — the CI system handles that
+- If you cannot fully solve the issue: still make the changes you can
 
 ## After implementation
 Write a short summary of what you did.

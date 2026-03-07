@@ -309,7 +309,17 @@ async function run() {
       core.warning(`Claude exited with code ${result.exitCode}, checking for changes anyway...`);
     }
 
-    const gitStatus = execSync('git status --porcelain').toString().trim();
+    // Check for changes: either uncommitted OR committed by Claude
+    let gitStatus = execSync('git status --porcelain').toString().trim();
+    const newCommits = execSync('git log --oneline HEAD --not --remotes 2>/dev/null || echo ""', { encoding: 'utf-8' }).trim();
+
+    if (!gitStatus && newCommits) {
+      // Claude committed changes itself — reset to keep them as uncommitted
+      core.info(`Claude made ${newCommits.split('\n').length} commit(s) — resetting to unstaged for our PR flow`);
+      const baseCommit = execSync('git merge-base HEAD origin/HEAD 2>/dev/null || git rev-parse HEAD~1', { encoding: 'utf-8' }).trim();
+      execSync(`git reset --soft ${baseCommit}`);
+      gitStatus = execSync('git status --porcelain').toString().trim();
+    }
 
     if (!gitStatus) {
       const summary = parseSummary(result.output) || result.output.slice(0, 500);
