@@ -58,17 +58,14 @@ async function createPR({ octokit, owner, repo, issueNumber, issueTitle, summary
     '*Please review before merging. If something is wrong: comment `claude-retry` on the issue.*',
   ].join('\n');
 
-  // Write PR title and body to files to avoid shell escaping issues
-  const prTitle = `feat: ${issueTitle} (#${issueNumber})`;
-  const titleFile = path.join(process.env.RUNNER_TEMP || '/tmp', 'pr-title.txt');
+  // Write body to file, pass title inline (escaped)
+  const prTitle = `feat: ${issueTitle} (#${issueNumber})`.replace(/"/g, '\\"').replace(/`/g, '');
   const bodyFile = path.join(process.env.RUNNER_TEMP || '/tmp', 'pr-body.md');
-  fs.writeFileSync(titleFile, prTitle);
   fs.writeFileSync(bodyFile, prBody);
 
-  const prUrl = execSync(
-    `gh pr create --title "$(cat '${titleFile}')" --body-file "${bodyFile}" --base ${baseBranch} --head ${branchName}`,
-    { encoding: 'utf-8' }
-  ).trim();
+  const cmd = `gh pr create --title "${prTitle}" --body-file "${bodyFile}" --base ${baseBranch} --head ${branchName}`;
+  core.info(`PR command: ${cmd}`);
+  const prUrl = execSync(cmd, { encoding: 'utf-8' }).trim();
 
   const prNumber = prUrl.split('/').pop();
 
