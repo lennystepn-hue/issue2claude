@@ -12,6 +12,7 @@ const { fetchPRContext, buildFeedbackPrompt } = require('./pr-feedback');
 const { buildReviewPrompt, buildFixPrompt, parseReview } = require('./auto-review');
 const { parseSlashCommand, buildSlashCommandPrompt } = require('./slash-commands');
 const { parseDependencies, checkDependencies, findBaseBranch } = require('./pr-chain');
+const { buildConflictPrompt, getConflictFiles } = require('./pr-rebase');
 
 function loadConfig() {
   const configPath = path.join(process.cwd(), '.issue2claude.yml');
@@ -609,6 +610,99 @@ async function runSlashCommandMode({ octokit, owner, repo, issueNumber, issueTit
   }
 }
 
+async function runRebaseMode({ octokit, owner, repo, prNumber, model, config }) {
+  const updater = new IssueUpdater(octokit, owner, repo, prNumber);
+
+  try {
+    core.info(`Starting rebase for PR #${prNumber}`);
+
+    const { data: pr } = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
+    const prBranch = pr.head.ref;
+    const baseBranch = pr.base.ref;
+
+    await octokit.rest.issues.createComment({
+      owner, repo, issue_number: prNumber,
+      body: `**Issue2Claude — Rebasing**\n\nRebasing \`${prBranch}\` onto \`${baseBranch}\`...\n\n\`Model: ${model}\``,
+    });
+
+    // Setup git
+    execSync('git config user.email "issue2claude[bot]@users.noreply.github.com"');
+    execSync('git config user.name "Issue2Claude"');
+
+    // Fetch and checkout PR branch
+    execSync(`git fetch origin ${prBranch} ${baseBranch}`);
+    execSync(`git checkout ${prBranch}`);
+
+    // Try rebase
+    let hasConflicts = false;
+    try {
+      execSync(`git rebase origin/${baseBranch}`, { encoding: 'utf-8' });
+      core.info('Rebase completed without conflicts');
+    } catch (e) {
+      // Rebase failed — conflicts
+      hasConflicts = true;
+      core.info('Rebase has conflicts, letting Claude resolve them...');
+    }
+
+    if (hasConflicts) {
+      const conflictFiles = getConflictFiles();
+      core.info(`Conflict files: ${conflictFiles.join(', ')}`);
+
+      if (conflictFiles.length === 0) {
+        execSync('git rebase --abort');
+        throw new Error('Rebase failed but no conflict files detected');
+      }
+
+      const prompt = buildConflictPrompt(conflictFiles, baseBranch);
+      const result = await runClaude(prompt, model, updater, { maxTurns: 200 });
+
+      // After Claude resolves conflicts, stage and continue rebase
+      execSync('git add -A');
+
+      try {
+        execSync('GIT_EDITOR=true git rebase --continue', { encoding: 'utf-8' });
+      } catch {
+        // If rebase continue fails, there might be more conflicts
+        // Try once more
+        const moreConflicts = getConflictFiles();
+        if (moreConflicts.length > 0) {
+          core.warning('Additional conflicts found after first resolution, aborting.');
+          execSync('git rebase --abort');
+          throw new Error(`Could not resolve all conflicts. Remaining: ${moreConflicts.join(', ')}`);
+        }
+        execSync('git add -A');
+        execSync('GIT_EDITOR=true git rebase --continue');
+      }
+
+      core.info('Conflicts resolved, rebase completed');
+    }
+
+    // Force push the rebased branch
+    execSync(`git push --force origin ${prBranch}`);
+    core.info(`Force pushed rebased branch: ${prBranch}`);
+
+    const comment = hasConflicts
+      ? '**Issue2Claude — Rebase complete!**\n\nConflicts were detected and resolved automatically. The branch has been rebased and force-pushed.'
+      : '**Issue2Claude — Rebase complete!**\n\nNo conflicts. The branch has been rebased onto `' + baseBranch + '` and force-pushed.';
+
+    await octokit.rest.issues.createComment({
+      owner, repo, issue_number: prNumber,
+      body: comment,
+    });
+
+  } catch (error) {
+    // Make sure we abort any in-progress rebase
+    try { execSync('git rebase --abort 2>/dev/null'); } catch {}
+
+    core.error(`Rebase failed: ${error.message}`);
+    await octokit.rest.issues.createComment({
+      owner, repo, issue_number: prNumber,
+      body: `**Issue2Claude — Rebase failed**\n\n${error.message}\n\nYou may need to resolve conflicts manually, or comment \`claude-rebase\` to try again.`,
+    });
+    core.setFailed(error.message);
+  }
+}
+
 async function run() {
   const authMode = core.getInput('auth-mode') || 'api-key';
   const apiKey = core.getInput('anthropic-api-key');
@@ -627,7 +721,14 @@ async function run() {
   const config = loadConfig();
   const model = modelInput || config.model || 'claude-opus-4-6';
 
-  if (mode === 'pr-feedback') {
+  if (mode === 'rebase') {
+    const prNumber = parseInt(core.getInput('pr-number'), 10);
+    if (!prNumber) {
+      core.setFailed('pr-number is required for rebase mode');
+      return;
+    }
+    await runRebaseMode({ octokit, owner, repo, prNumber, model, config });
+  } else if (mode === 'pr-feedback') {
     const prNumber = parseInt(core.getInput('pr-number'), 10);
     if (!prNumber) {
       core.setFailed('pr-number is required for pr-feedback mode');

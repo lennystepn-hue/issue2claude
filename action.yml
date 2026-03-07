@@ -41,7 +41,7 @@ inputs:
     description: 'Claude model to use'
     default: 'claude-sonnet-4-6'
   mode:
-    description: 'Mode: "issue", "pr-feedback", or "slash-command"'
+    description: 'Mode: "issue", "pr-feedback", "slash-command", or "rebase"'
     required: false
     default: 'issue'
   pr-number:

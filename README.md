@@ -100,6 +100,9 @@ Comment on any issue:
 | `/claude test` | Writes tests only (creates PR) |
 | `/claude refactor` | Refactors without behavior change (creates PR) |
 
+### Auto-Rebase
+**Comment `claude-rebase` on a PR** with merge conflicts. Claude rebases the branch, resolves conflicts intelligently, and force-pushes. No more manual conflict resolution.
+
 ### PR Chain
 Issues can declare dependencies:
 
