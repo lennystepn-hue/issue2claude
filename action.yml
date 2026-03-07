@@ -24,19 +24,30 @@ inputs:
     default: ''
   issue-number:
     description: 'Issue number to solve'
-    required: true
+    required: false
+    default: ''
   issue-title:
     description: 'Issue title'
-    required: true
+    required: false
+    default: ''
   issue-body:
     description: 'Issue body/description'
-    required: true
+    required: false
+    default: ''
   repo:
     description: 'Repository (owner/name)'
     required: true
   model:
     description: 'Claude model to use'
     default: 'claude-sonnet-4-6'
+  mode:
+    description: 'Mode: "issue" (default) or "pr-feedback"'
+    required: false
+    default: 'issue'
+  pr-number:
+    description: 'PR number (required for pr-feedback mode)'
+    required: false
+    default: ''
 
 runs:
   using: 'node20'

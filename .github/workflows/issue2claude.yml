@@ -7,10 +7,12 @@ on:
     types: [created]
 
 jobs:
+  # Job 1: Solve issues (triggered by label or claude-retry comment on issues)
   solve-issue:
     if: |
       (github.event_name == 'issues' && github.event.label.name == 'claude-ready') ||
       (github.event_name == 'issue_comment' &&
+       !github.event.issue.pull_request &&
        contains(github.event.comment.body, 'claude-retry') &&
        (github.event.comment.author_association == 'OWNER' ||
         github.event.comment.author_association == 'MEMBER' ||
@@ -37,26 +39,55 @@ jobs:
       - name: Install Claude Code
         run: npm install -g @anthropic-ai/claude-code@latest
 
-      # Option A: API Key (pay per use)
-      # - name: Run Issue2Claude (API Key)
-      #   uses: ./
-      #   with:
-      #     auth-mode: api-key
-      #     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-      #     github-token: ${{ secrets.GITHUB_TOKEN }}
-      #     issue-number: ${{ github.event.issue.number || github.event.comment.issue_number }}
-      #     issue-title: ${{ github.event.issue.title }}
-      #     issue-body: ${{ github.event.issue.body }}
-      #     repo: ${{ github.repository }}
-
-      # Option B: Claude Max/Pro (subscription, no extra cost)
       - name: Run Issue2Claude
         uses: ./
         with:
+          mode: issue
           auth-mode: max
           oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          issue-number: ${{ github.event.issue.number || github.event.comment.issue_number }}
+          issue-number: ${{ github.event.issue.number }}
           issue-title: ${{ github.event.issue.title }}
           issue-body: ${{ github.event.issue.body }}
+          repo: ${{ github.repository }}
+
+  # Job 2: Apply PR feedback (triggered by claude-fix comment on PRs)
+  pr-feedback:
+    if: |
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, 'claude-fix') &&
+      (github.event.comment.author_association == 'OWNER' ||
+       github.event.comment.author_association == 'MEMBER' ||
+       github.event.comment.author_association == 'COLLABORATOR')
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code@latest
+
+      - name: Run Issue2Claude (PR Feedback)
+        uses: ./
+        with:
+          mode: pr-feedback
+          auth-mode: max
+          oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          pr-number: ${{ github.event.issue.number }}
           repo: ${{ github.repository }}

@@ -8,6 +8,7 @@ const yaml = require('js-yaml');
 const { buildPrompt, readFileIfExists } = require('./prompt-builder');
 const { IssueUpdater } = require('./issue-updater');
 const { createPR } = require('./pr-creator');
+const { fetchPRContext, buildFeedbackPrompt } = require('./pr-feedback');
 
 function loadConfig() {
   const configPath = path.join(process.cwd(), '.issue2claude.yml');
@@ -249,24 +250,11 @@ async function runClaude(prompt, model, updater) {
   });
 }
 
-async function run() {
-  const authMode = core.getInput('auth-mode') || 'api-key';
-  const apiKey = core.getInput('anthropic-api-key');
-  const oauthToken = core.getInput('oauth-token');
-  const githubToken = core.getInput('github-token', { required: true });
-  const issueNumber = parseInt(core.getInput('issue-number', { required: true }), 10);
-  const issueTitle = core.getInput('issue-title', { required: true });
-  const issueBody = core.getInput('issue-body', { required: true });
-  const repoFull = core.getInput('repo', { required: true });
-  const modelInput = core.getInput('model');
-
-  const [owner, repo] = repoFull.split('/');
-
-  // Set auth
+function setupAuth(authMode, apiKey, oauthToken) {
   if (authMode === 'max' || authMode === 'oauth') {
     if (!oauthToken) {
       core.setFailed('oauth-token is required when auth-mode is "max"');
-      return;
+      return false;
     }
     let token = oauthToken;
     try {
@@ -280,16 +268,15 @@ async function run() {
   } else {
     if (!apiKey) {
       core.setFailed('anthropic-api-key is required when auth-mode is "api-key"');
-      return;
+      return false;
     }
     process.env.ANTHROPIC_API_KEY = apiKey;
     core.info('Auth mode: API Key');
   }
-  process.env.GITHUB_TOKEN = githubToken;
+  return true;
+}
 
-  const octokit = github.getOctokit(githubToken);
-  const config = loadConfig();
-  const model = modelInput || config.model || 'claude-opus-4-6';
+async function runIssueMode({ octokit, owner, repo, issueNumber, issueTitle, issueBody, model, config }) {
   const updater = new IssueUpdater(octokit, owner, repo, issueNumber);
 
   try {
@@ -314,7 +301,6 @@ async function run() {
     const newCommits = execSync('git log --oneline HEAD --not --remotes 2>/dev/null || echo ""', { encoding: 'utf-8' }).trim();
 
     if (!gitStatus && newCommits) {
-      // Claude committed changes itself — reset to keep them as uncommitted
       core.info(`Claude made ${newCommits.split('\n').length} commit(s) — resetting to unstaged for our PR flow`);
       const baseCommit = execSync('git merge-base HEAD origin/HEAD 2>/dev/null || git rev-parse HEAD~1', { encoding: 'utf-8' }).trim();
       execSync(`git reset --soft ${baseCommit}`);
@@ -355,6 +341,136 @@ async function run() {
     core.error(`Issue2Claude failed: ${error.message}`);
     await updater.postErrorComment(error.message);
     core.setFailed(error.message);
+  }
+}
+
+async function runPRFeedbackMode({ octokit, owner, repo, prNumber, model, config }) {
+  const updater = new IssueUpdater(octokit, owner, repo, prNumber);
+
+  try {
+    core.info(`Starting Issue2Claude PR feedback for PR #${prNumber}`);
+
+    // Post start comment on the PR
+    await octokit.rest.issues.createComment({
+      owner, repo, issue_number: prNumber,
+      body: [
+        '**Issue2Claude — Applying feedback**',
+        '',
+        'Claude is reading your review comments and applying changes...',
+        '',
+        `\`Model: ${model}\``,
+      ].join('\n'),
+    });
+
+    // Fetch PR context (diff, comments, review comments)
+    const ctx = await fetchPRContext(octokit, owner, repo, prNumber);
+    core.info(`PR #${prNumber}: "${ctx.pr.title}", ${ctx.reviewComments.length} review comments, ${ctx.issueComments.length} issue comments`);
+
+    // Checkout the PR branch
+    const prBranch = ctx.pr.head.ref;
+    core.info(`Checking out PR branch: ${prBranch}`);
+    execSync(`git fetch origin ${prBranch}`);
+    execSync(`git checkout ${prBranch}`);
+
+    // Build feedback prompt
+    const prompt = buildFeedbackPrompt({ pr: ctx.pr, diff: ctx.diff, reviewComments: ctx.reviewComments, issueComments: ctx.issueComments, config });
+    core.info('Feedback prompt built successfully');
+
+    const result = await runClaude(prompt, model, updater);
+    core.info(`Claude finished in ${Math.round(result.duration / 1000)}s`);
+
+    // Check for changes
+    let gitStatus = execSync('git status --porcelain').toString().trim();
+    const newCommits = execSync('git log --oneline HEAD --not --remotes 2>/dev/null || echo ""', { encoding: 'utf-8' }).trim();
+
+    if (!gitStatus && newCommits) {
+      core.info(`Claude made ${newCommits.split('\n').length} commit(s) — resetting for our commit flow`);
+      const baseCommit = execSync(`git rev-parse origin/${prBranch}`, { encoding: 'utf-8' }).trim();
+      execSync(`git reset --soft ${baseCommit}`);
+      gitStatus = execSync('git status --porcelain').toString().trim();
+    }
+
+    if (!gitStatus) {
+      await octokit.rest.issues.createComment({
+        owner, repo, issue_number: prNumber,
+        body: '**Issue2Claude — No changes needed**\n\nClaude reviewed the feedback but determined no code changes were necessary.',
+      });
+      return;
+    }
+
+    // Commit and push to the same PR branch
+    execSync('git config user.email "issue2claude[bot]@users.noreply.github.com"');
+    execSync('git config user.name "Issue2Claude"');
+    execSync('git add -A');
+
+    const summary = parseSummary(result.output) || 'Applied review feedback.';
+    const commitMsg = `fix: apply review feedback on PR #${prNumber}`;
+    const commitFile = path.join(process.env.RUNNER_TEMP || '/tmp', 'commit-msg.txt');
+    fs.writeFileSync(commitFile, commitMsg);
+    execSync(`git commit -F "${commitFile}"`);
+    execSync(`git push origin ${prBranch}`);
+
+    core.info(`Pushed feedback changes to ${prBranch}`);
+
+    const durationMin = Math.round(result.duration / 60000);
+    await octokit.rest.issues.createComment({
+      owner, repo, issue_number: prNumber,
+      body: [
+        '**Issue2Claude — Feedback applied!**',
+        '',
+        '**What Claude changed:**',
+        summary,
+        '',
+        `**Cost:** ~$${result.cost ? result.cost.toFixed(2) : '?'} | **Duration:** ${durationMin}min`,
+        '',
+        'Please review the new changes.',
+      ].join('\n'),
+    });
+
+  } catch (error) {
+    core.error(`Issue2Claude PR feedback failed: ${error.message}`);
+    await octokit.rest.issues.createComment({
+      owner, repo, issue_number: prNumber,
+      body: `**Issue2Claude — Error applying feedback**\n\n${error.message}\n\nComment \`claude-fix\` to try again.`,
+    });
+    core.setFailed(error.message);
+  }
+}
+
+async function run() {
+  const authMode = core.getInput('auth-mode') || 'api-key';
+  const apiKey = core.getInput('anthropic-api-key');
+  const oauthToken = core.getInput('oauth-token');
+  const githubToken = core.getInput('github-token', { required: true });
+  const repoFull = core.getInput('repo', { required: true });
+  const modelInput = core.getInput('model');
+  const mode = core.getInput('mode') || 'issue';
+
+  const [owner, repo] = repoFull.split('/');
+
+  if (!setupAuth(authMode, apiKey, oauthToken)) return;
+  process.env.GITHUB_TOKEN = githubToken;
+
+  const octokit = github.getOctokit(githubToken);
+  const config = loadConfig();
+  const model = modelInput || config.model || 'claude-opus-4-6';
+
+  if (mode === 'pr-feedback') {
+    const prNumber = parseInt(core.getInput('pr-number'), 10);
+    if (!prNumber) {
+      core.setFailed('pr-number is required for pr-feedback mode');
+      return;
+    }
+    await runPRFeedbackMode({ octokit, owner, repo, prNumber, model, config });
+  } else {
+    const issueNumber = parseInt(core.getInput('issue-number'), 10);
+    const issueTitle = core.getInput('issue-title');
+    const issueBody = core.getInput('issue-body');
+    if (!issueNumber) {
+      core.setFailed('issue-number is required for issue mode');
+      return;
+    }
+    await runIssueMode({ octokit, owner, repo, issueNumber, issueTitle, issueBody, model, config });
   }
 }
 

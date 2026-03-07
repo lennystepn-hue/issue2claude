@@ -52,6 +52,8 @@ Claude Code reads your issue, analyzes your codebase, implements the fix, and op
 5. You review and merge
 
 > Something wrong? Comment **`claude-retry`** on the issue to run it again.
+>
+> Want changes on the PR? Leave review comments and write **`claude-fix`** — Claude applies your feedback automatically.
 
 ---
 
@@ -110,13 +112,13 @@ jobs:
     if: |
       (github.event_name == 'issues' && github.event.label.name == 'claude-ready') ||
       (github.event_name == 'issue_comment' &&
+       !github.event.issue.pull_request &&
        contains(github.event.comment.body, 'claude-retry') &&
        (github.event.comment.author_association == 'OWNER' ||
         github.event.comment.author_association == 'MEMBER' ||
         github.event.comment.author_association == 'COLLABORATOR'))
 
     runs-on: ubuntu-latest
-
     permissions:
       contents: write
       pull-requests: write
@@ -126,21 +128,51 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-
       - run: npm install -g @anthropic-ai/claude-code@latest
-
       - uses: lennystepn-hue/issue2claude@main
         with:
+          mode: issue
           auth-mode: api-key
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          issue-number: ${{ github.event.issue.number || github.event.comment.issue_number }}
+          issue-number: ${{ github.event.issue.number }}
           issue-title: ${{ github.event.issue.title }}
           issue-body: ${{ github.event.issue.body }}
+          repo: ${{ github.repository }}
+
+  pr-feedback:
+    if: |
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, 'claude-fix') &&
+      (github.event.comment.author_association == 'OWNER' ||
+       github.event.comment.author_association == 'MEMBER' ||
+       github.event.comment.author_association == 'COLLABORATOR')
+
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install -g @anthropic-ai/claude-code@latest
+      - uses: lennystepn-hue/issue2claude@main
+        with:
+          mode: pr-feedback
+          auth-mode: api-key
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          pr-number: ${{ github.event.issue.number }}
           repo: ${{ github.repository }}
 ```
 </details>
@@ -162,13 +194,13 @@ jobs:
     if: |
       (github.event_name == 'issues' && github.event.label.name == 'claude-ready') ||
       (github.event_name == 'issue_comment' &&
+       !github.event.issue.pull_request &&
        contains(github.event.comment.body, 'claude-retry') &&
        (github.event.comment.author_association == 'OWNER' ||
         github.event.comment.author_association == 'MEMBER' ||
         github.event.comment.author_association == 'COLLABORATOR'))
 
     runs-on: ubuntu-latest
-
     permissions:
       contents: write
       pull-requests: write
@@ -178,21 +210,51 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-
       - run: npm install -g @anthropic-ai/claude-code@latest
-
       - uses: lennystepn-hue/issue2claude@main
         with:
+          mode: issue
           auth-mode: max
           oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          issue-number: ${{ github.event.issue.number || github.event.comment.issue_number }}
+          issue-number: ${{ github.event.issue.number }}
           issue-title: ${{ github.event.issue.title }}
           issue-body: ${{ github.event.issue.body }}
+          repo: ${{ github.repository }}
+
+  pr-feedback:
+    if: |
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, 'claude-fix') &&
+      (github.event.comment.author_association == 'OWNER' ||
+       github.event.comment.author_association == 'MEMBER' ||
+       github.event.comment.author_association == 'COLLABORATOR')
+
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install -g @anthropic-ai/claude-code@latest
+      - uses: lennystepn-hue/issue2claude@main
+        with:
+          mode: pr-feedback
+          auth-mode: max
+          oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          pr-number: ${{ github.event.issue.number }}
           repo: ${{ github.repository }}
 ```
 </details>
@@ -203,6 +265,30 @@ jobs:
 - **"Allow GitHub Actions to create and approve pull requests"**
 
 Then write an issue, add the `claude-ready` label, and watch the magic happen.
+
+---
+
+## PR Feedback Loop
+
+This is what makes Issue2Claude unique: **you can talk to Claude on the PR.**
+
+1. Claude creates a PR
+2. You review it and leave comments — inline review comments or a regular comment
+3. Comment **`claude-fix`** on the PR
+4. Claude reads your feedback + the current diff, applies the changes, and pushes to the same branch
+5. Repeat until it's perfect
+
+No other tool does this. It's like having a junior dev that instantly applies your code review feedback.
+
+```
+You: "Move this function to a separate utils file"
+     "Add error handling for the API call"
+     "Use TypeScript instead of plain JS"
+
+→ claude-fix
+
+Claude: *applies all feedback, pushes to branch*
+```
 
 ---
 
