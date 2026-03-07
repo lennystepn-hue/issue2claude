@@ -751,26 +751,9 @@ async function run() {
 
   const [owner, repo] = repoFull.split('/');
 
-  if (!setupAuth(authMode, apiKey, oauthToken)) return;
   process.env.GITHUB_TOKEN = githubToken;
 
-  const octokit = github.getOctokit(githubToken);
-  const config = loadConfig();
-  let model = modelInput || config.model || 'claude-opus-4-6';
-
-  // Smart Model Selection: auto-detect complexity and pick the right model
-  if (config.smart_model !== false && mode === 'issue' && !modelInput) {
-    const issueTitle = core.getInput('issue-title') || '';
-    const issueBody = core.getInput('issue-body') || '';
-    try {
-      const complexity = await analyzeComplexity(issueTitle, issueBody);
-      model = pickModel(complexity, config);
-      core.info(`Smart Model: complexity=${complexity}, using ${model}`);
-    } catch (e) {
-      core.warning(`Smart model selection failed: ${e.message}, using default`);
-    }
-  }
-
+  // Index mode doesn't need Claude auth
   if (mode === 'index') {
     const openaiKey = core.getInput('openai-api-key');
     if (!openaiKey) {
@@ -798,7 +781,30 @@ async function run() {
       core.setFailed(`Index build failed: ${e.message}`);
     }
     return;
-  } else if (mode === 'rebase') {
+  }
+
+  // All other modes need Claude auth
+  const authOk = setupAuth(authMode, apiKey, oauthToken);
+  if (!authOk) return;
+
+  const octokit = github.getOctokit(githubToken);
+  const config = loadConfig();
+
+  // Smart model selection
+  let model = modelInput || config.model || 'claude-opus-4-6';
+  if (mode === 'issue') {
+    const issueTitle = core.getInput('issue-title') || '';
+    const issueBody = core.getInput('issue-body') || '';
+    try {
+      const complexity = await analyzeComplexity(issueTitle, issueBody);
+      model = pickModel(complexity, config);
+      core.info(`Smart model selection: complexity=${complexity}, model=${model}`);
+    } catch (e) {
+      core.info(`Smart model selection failed, using default: ${model} (${e.message})`);
+    }
+  }
+
+  if (mode === 'rebase') {
     const prNumber = parseInt(core.getInput('pr-number'), 10);
     if (!prNumber) {
       core.setFailed('pr-number is required for rebase mode');
