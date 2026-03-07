@@ -28,14 +28,8 @@ class IssueUpdater {
     return data.id;
   }
 
-  async updateProgress(status) {
+  async updateProgress(body) {
     if (!this.progressCommentId) return;
-
-    const body = [
-      `**Issue2Claude working** — #${this.issueNumber}`,
-      '',
-      `Status: ${status}`,
-    ].join('\n');
 
     await this.octokit.rest.issues.updateComment({
       owner: this.owner,

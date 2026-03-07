@@ -29,24 +29,23 @@ function parseSummary(output) {
   return match ? match[1].trim() : null;
 }
 
-function parseClaudeResult(stdout) {
-  // Claude --output-format json returns a JSON object
-  try {
-    const result = JSON.parse(stdout);
-    return {
-      output: result.result || '',
-      cost: result.cost_usd || null,
-      duration: result.duration_ms || null,
-      turns: result.num_turns || null,
-    };
-  } catch {
-    // If JSON parsing fails, treat the whole output as text
-    return {
-      output: stdout,
-      cost: null,
-      duration: null,
-      turns: null,
-    };
+function describeToolUse(toolName, toolInput) {
+  switch (toolName) {
+    case 'Read':
+      return `Reading \`${toolInput.file_path || 'file'}\``;
+    case 'Write':
+      return `Writing \`${toolInput.file_path || 'file'}\``;
+    case 'Edit':
+      return `Editing \`${toolInput.file_path || 'file'}\``;
+    case 'Glob':
+      return `Searching for \`${toolInput.pattern || 'files'}\``;
+    case 'Grep':
+      return `Searching for \`${toolInput.pattern || 'text'}\``;
+    case 'Bash':
+      const cmd = (toolInput.command || '').slice(0, 80);
+      return `Running \`${cmd}\``;
+    default:
+      return `Using ${toolName}`;
   }
 }
 
@@ -56,9 +55,9 @@ async function runClaude(prompt, model, updater) {
 
     const args = [
       '-p', prompt,
-      '--allowedTools', 'Read,Write,Bash,Glob,Grep',
+      '--allowedTools', 'Read,Write,Edit,Bash,Glob,Grep',
       '--max-turns', '30',
-      '--output-format', 'json',
+      '--output-format', 'stream-json',
       '--model', model,
       '--dangerously-skip-permissions',
     ];
@@ -68,45 +67,131 @@ async function runClaude(prompt, model, updater) {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
-    let stdout = '';
     let stderr = '';
+    let lastResult = null;
+    let lastAssistantText = '';
+    let activities = [];
+    let filesChanged = new Set();
+    let lastUpdateTime = 0;
+    let buffer = '';
+
+    function trackActivity(desc) {
+      activities.push(desc);
+      if (activities.length > 8) activities.shift();
+    }
+
+    async function pushUpdate() {
+      const now = Date.now();
+      // Rate limit: max one update per 30 seconds
+      if (now - lastUpdateTime < 30000) return;
+      lastUpdateTime = now;
+
+      const elapsed = Math.round((now - startTime) / 1000);
+      const mins = Math.floor(elapsed / 60);
+      const secs = elapsed % 60;
+      const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+
+      const lines = [
+        `**Issue2Claude working** — #${updater.issueNumber}`,
+        '',
+        `**Elapsed:** ${timeStr}`,
+      ];
+
+      if (filesChanged.size > 0) {
+        lines.push('', `**Files touched:** ${filesChanged.size}`);
+        const fileList = [...filesChanged].slice(-5);
+        fileList.forEach(f => lines.push(`- \`${f}\``));
+        if (filesChanged.size > 5) lines.push(`- ... and ${filesChanged.size - 5} more`);
+      }
+
+      if (activities.length > 0) {
+        lines.push('', '**Recent activity:**');
+        activities.slice(-5).forEach(a => lines.push(`- ${a}`));
+      }
+
+      try {
+        await updater.updateProgress(lines.join('\n'));
+      } catch {
+        // Ignore update errors
+      }
+    }
 
     child.stdout.on('data', (data) => {
-      stdout += data.toString();
+      buffer += data.toString();
+
+      // Parse newline-delimited JSON events
+      const lines = buffer.split('\n');
+      buffer = lines.pop(); // Keep incomplete line in buffer
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const event = JSON.parse(line);
+
+          if (event.type === 'result') {
+            lastResult = event;
+          } else if (event.type === 'assistant' && event.message) {
+            // Track tool use from assistant messages
+            const msg = event.message;
+            if (msg.content && Array.isArray(msg.content)) {
+              for (const block of msg.content) {
+                if (block.type === 'tool_use') {
+                  const desc = describeToolUse(block.name, block.input || {});
+                  trackActivity(desc);
+                  core.info(`Claude: ${desc}`);
+
+                  // Track files
+                  const fp = block.input?.file_path;
+                  if (fp && (block.name === 'Write' || block.name === 'Edit')) {
+                    filesChanged.add(fp.replace(process.cwd() + '/', ''));
+                  }
+
+                  pushUpdate();
+                } else if (block.type === 'text' && block.text) {
+                  lastAssistantText = block.text;
+                }
+              }
+            }
+          }
+        } catch {
+          // Skip unparseable lines
+        }
+      }
     });
 
     child.stderr.on('data', (data) => {
       stderr += data.toString();
     });
 
-    // Progress updates every 60 seconds
-    const progressInterval = setInterval(async () => {
-      const elapsed = Math.round((Date.now() - startTime) / 1000);
-      try {
-        await updater.updateProgress(`Working... (${elapsed}s elapsed)`);
-      } catch {
-        // Ignore update errors
-      }
+    // Fallback: update every 60s even without events
+    const fallbackInterval = setInterval(() => {
+      lastUpdateTime = 0; // Force update
+      pushUpdate();
     }, 60000);
 
     child.on('close', (code) => {
-      clearInterval(progressInterval);
+      clearInterval(fallbackInterval);
       const duration = Date.now() - startTime;
 
-      if (code !== 0 && !stdout) {
+      if (code !== 0 && !lastResult && !lastAssistantText) {
         reject(new Error(`Claude exited with code ${code}: ${stderr}`));
         return;
       }
 
-      const result = parseClaudeResult(stdout);
-      result.duration = result.duration || duration;
-      result.exitCode = code;
-      result.stderr = stderr;
+      const result = {
+        output: lastResult?.result || lastAssistantText || '',
+        cost: lastResult?.cost_usd || null,
+        duration: lastResult?.duration_ms || duration,
+        turns: lastResult?.num_turns || null,
+        exitCode: code,
+        stderr,
+        filesChanged: [...filesChanged],
+      };
       resolve(result);
     });
 
     child.on('error', (err) => {
-      clearInterval(progressInterval);
+      clearInterval(fallbackInterval);
       reject(err);
     });
   });
