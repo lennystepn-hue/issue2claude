@@ -20,9 +20,12 @@ async function createPR({ octokit, owner, repo, issueNumber, issueTitle, summary
   execSync('git config user.email "issue2claude[bot]@users.noreply.github.com"');
   execSync('git config user.name "Issue2Claude"');
 
-  // Create branch, stage, commit
+  // Create branch, stage (excluding workflow files — no workflows permission), commit
   execSync(`git checkout -b ${branchName}`);
+  execSync('git reset HEAD .github/workflows/ 2>/dev/null || true');
+  execSync('git checkout -- .github/workflows/ 2>/dev/null || true');
   execSync('git add -A');
+  execSync('git reset HEAD .github/workflows/ 2>/dev/null || true');
 
   // Write commit message to file to avoid escaping issues
   const commitMsg = `feat: ${issueTitle} (closes #${issueNumber})`;

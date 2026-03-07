@@ -484,7 +484,9 @@ async function runPRFeedbackMode({ octokit, owner, repo, prNumber, model, config
     // Commit and push to the same PR branch
     execSync('git config user.email "issue2claude[bot]@users.noreply.github.com"');
     execSync('git config user.name "Issue2Claude"');
+    execSync('git checkout -- .github/workflows/ 2>/dev/null || true');
     execSync('git add -A');
+    execSync('git reset HEAD .github/workflows/ 2>/dev/null || true');
 
     const summary = parseSummary(result.output) || 'Applied review feedback.';
     const commitMsg = `fix: apply review feedback on PR #${prNumber}`;

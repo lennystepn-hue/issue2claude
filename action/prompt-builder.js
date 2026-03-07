@@ -29,7 +29,7 @@ function buildPrompt({ issueNumber, issueTitle, issueBody, comments, config }) {
   if (config.restricted_paths && config.restricted_paths.length > 0) {
     restrictedSection = `- Do NOT touch: ${config.restricted_paths.join(', ')}`;
   } else {
-    restrictedSection = '- Do NOT touch: .env*, secrets/, .github/workflows/';
+    restrictedSection = '- Do NOT touch: .env*, secrets/, .github/workflows/, *.key, *.pem';
   }
 
   // Build comments section
