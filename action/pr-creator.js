@@ -1,4 +1,6 @@
 const { execSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 
 function slugify(text) {
   return text
@@ -11,6 +13,7 @@ function slugify(text) {
 async function createPR({ octokit, owner, repo, issueNumber, issueTitle, summary, model, cost, duration, tokens }) {
   const slug = slugify(issueTitle);
   const branchName = `issue2claude/${issueNumber}-${slug}`;
+  const baseBranch = execSync('git rev-parse --abbrev-ref HEAD', { encoding: 'utf-8' }).trim();
 
   // Configure git
   execSync('git config user.email "issue2claude[bot]@users.noreply.github.com"');
@@ -20,8 +23,11 @@ async function createPR({ octokit, owner, repo, issueNumber, issueTitle, summary
   execSync(`git checkout -b ${branchName}`);
   execSync('git add -A');
 
+  // Write commit message to file to avoid escaping issues
   const commitMsg = `feat: ${issueTitle} (closes #${issueNumber})`;
-  execSync(`git commit -m "${commitMsg.replace(/"/g, '\\"')}"`);
+  const commitFile = path.join(process.env.RUNNER_TEMP || '/tmp', 'commit-msg.txt');
+  fs.writeFileSync(commitFile, commitMsg);
+  execSync(`git commit -F "${commitFile}"`);
   execSync(`git push origin ${branchName}`);
 
   // Get changed files
@@ -52,13 +58,18 @@ async function createPR({ octokit, owner, repo, issueNumber, issueTitle, summary
     '*Please review before merging. If something is wrong: comment `claude-retry` on the issue.*',
   ].join('\n');
 
-  // Create PR via gh CLI
+  // Write PR title and body to files to avoid shell escaping issues
+  const prTitle = `feat: ${issueTitle} (#${issueNumber})`;
+  const titleFile = path.join(process.env.RUNNER_TEMP || '/tmp', 'pr-title.txt');
+  const bodyFile = path.join(process.env.RUNNER_TEMP || '/tmp', 'pr-body.md');
+  fs.writeFileSync(titleFile, prTitle);
+  fs.writeFileSync(bodyFile, prBody);
+
   const prUrl = execSync(
-    `gh pr create --title "feat: ${issueTitle.replace(/"/g, '\\"')} (#${issueNumber})" --body "${prBody.replace(/"/g, '\\"')}" --base main --head ${branchName}`,
+    `gh pr create --title "$(cat '${titleFile}')" --body-file "${bodyFile}" --base ${baseBranch} --head ${branchName}`,
     { encoding: 'utf-8' }
   ).trim();
 
-  // Extract PR number from URL
   const prNumber = prUrl.split('/').pop();
 
   return { prNumber, prUrl, branchName };

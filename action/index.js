@@ -14,7 +14,7 @@ function loadConfig() {
   const content = readFileIfExists(configPath);
   if (!content) {
     return {
-      model: 'claude-sonnet-4-6',
+      model: 'claude-opus-4-6',
       trigger_label: 'claude-ready',
       restricted_paths: ['.env*', 'secrets/', '*.key', '*.pem'],
       context_files: [],
@@ -289,7 +289,7 @@ async function run() {
 
   const octokit = github.getOctokit(githubToken);
   const config = loadConfig();
-  const model = modelInput || config.model || 'claude-sonnet-4-6';
+  const model = modelInput || config.model || 'claude-opus-4-6';
   const updater = new IssueUpdater(octokit, owner, repo, issueNumber);
 
   try {
