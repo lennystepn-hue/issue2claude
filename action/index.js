@@ -1,10 +1,9 @@
 const core = require('@actions/core');
 const github = require('@actions/github');
-const { execSync } = require('child_process');
+const { execSync, spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');
-const { query } = require('@anthropic-ai/claude-agent-sdk');
 
 const { buildPrompt, readFileIfExists } = require('./prompt-builder');
 const { IssueUpdater } = require('./issue-updater');
@@ -59,8 +58,8 @@ async function runClaude(prompt, model, updater) {
   let turnCount = 0;
   let eventCount = 0;
   let lastUpdateTime = 0;
-  let lastResultText = '';
   let phase = 'starting';
+  let hasReceivedOutput = false;
 
   const phaseLabels = {
     starting: 'Starting up...',
@@ -83,9 +82,9 @@ async function runClaude(prompt, model, updater) {
     return phase;
   }
 
-  async function pushUpdate() {
+  async function pushUpdate(force) {
     const now = Date.now();
-    if (now - lastUpdateTime < 20000) return;
+    if (!force && now - lastUpdateTime < 20000) return;
     lastUpdateTime = now;
 
     phase = detectPhase();
@@ -105,6 +104,10 @@ async function runClaude(prompt, model, updater) {
       `| **Events** | ${eventCount} |`,
     ];
 
+    if (!hasReceivedOutput) {
+      lines.push('', '> Waiting for Claude to respond...');
+    }
+
     if (filesRead.size > 0) {
       lines.push('', `**Files read:** ${filesRead.size}`);
     }
@@ -116,9 +119,8 @@ async function runClaude(prompt, model, updater) {
 
     if (activities.length > 0) {
       lines.push('', '**Recent activity:**');
-      const now2 = Date.now();
       activities.slice(-6).forEach(a => {
-        const ago = Math.round((now2 - a.time) / 1000);
+        const ago = Math.round((Date.now() - a.time) / 1000);
         const agoStr = ago < 60 ? `${ago}s ago` : `${Math.floor(ago / 60)}m ago`;
         lines.push(`- ${a.desc} *(${agoStr})*`);
       });
@@ -131,113 +133,120 @@ async function runClaude(prompt, model, updater) {
     }
   }
 
-  // Ensure Claude Code CLI is in PATH (GitHub Actions may not propagate PATH between steps)
-  const possiblePaths = [
-    path.join(process.env.HOME || '', '.local', 'bin'),
-    '/usr/local/bin',
-    path.join(process.env.HOME || '', '.npm-global', 'bin'),
-  ];
-  for (const p of possiblePaths) {
-    if (!process.env.PATH.includes(p)) {
-      process.env.PATH = `${p}:${process.env.PATH}`;
-    }
-  }
+  // Write prompt to temp file to avoid shell escaping issues
+  const promptFile = path.join(process.env.RUNNER_TEMP || '/tmp', 'claude-prompt.txt');
+  fs.writeFileSync(promptFile, prompt);
 
-  // Verify claude is available
-  try {
-    const claudePath = execSync('which claude 2>/dev/null || echo NOT_FOUND', { encoding: 'utf-8' }).trim();
-    core.info(`Claude CLI found at: ${claudePath}`);
-  } catch {
-    core.warning('Could not locate claude CLI');
-  }
+  core.info(`Running Claude CLI (model: ${model})...`);
 
-  // Debug: test claude directly first
-  try {
-    const testOut = execSync('claude -p "respond with OK" --output-format json --max-turns 1 2>&1 || true', {
-      encoding: 'utf-8',
-      timeout: 30000,
+  return new Promise((resolve, reject) => {
+    // Use shell to read prompt from file
+    const child = spawn('bash', ['-c', `cat "${promptFile}" | claude -p - --allowedTools Read,Write,Edit,Bash,Glob,Grep --max-turns 30 --output-format stream-json --model ${model} --dangerously-skip-permissions`], {
       env: { ...process.env },
+      stdio: ['pipe', 'pipe', 'pipe'],
     });
-    core.info(`Claude test output: ${testOut.slice(0, 500)}`);
-  } catch (e) {
-    core.error(`Claude test failed: ${e.message}`);
-    core.error(`Claude test stderr: ${e.stderr || 'none'}`);
-  }
 
-  // Run Claude via SDK
-  core.info(`Running Claude via Agent SDK (model: ${model})...`);
+    let stderr = '';
+    let lastResult = null;
+    let lastAssistantText = '';
+    let buffer = '';
 
-  const options = {
-    maxTurns: 30,
-    model,
-    permissionMode: 'dangerouslySkipPermissions',
-    allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep'],
-  };
+    child.stdout.on('data', (data) => {
+      const chunk = data.toString();
+      buffer += chunk;
+      hasReceivedOutput = true;
 
-  let resultMessage = null;
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
 
-  try {
-    for await (const message of query({ prompt, options })) {
-      eventCount++;
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const event = JSON.parse(line);
+          eventCount++;
 
-      if (message.type === 'system' && message.subtype === 'init') {
-        core.info(`Claude initialized: model=${message.model || model}, session=${message.session_id || 'unknown'}`);
-        trackActivity('Claude Code initialized');
-        await pushUpdate();
-      }
+          if (event.type === 'result') {
+            lastResult = event;
+            phase = 'finishing';
+            core.info(`Result: cost=$${event.cost_usd || event.total_cost_usd || '?'}, turns=${event.num_turns || '?'}`);
+          } else if (event.type === 'assistant' && event.message) {
+            turnCount++;
+            const msg = event.message;
+            if (msg.content && Array.isArray(msg.content)) {
+              for (const block of msg.content) {
+                if (block.type === 'tool_use') {
+                  const desc = describeToolUse(block.name, block.input || {});
+                  trackActivity(desc);
+                  core.info(`[Turn ${turnCount}] ${desc}`);
 
-      if (message.type === 'assistant') {
-        turnCount++;
-        if (message.message?.content && Array.isArray(message.message.content)) {
-          for (const block of message.message.content) {
-            if (block.type === 'tool_use') {
-              const desc = describeToolUse(block.name, block.input || {});
-              trackActivity(desc);
-              core.info(`[Turn ${turnCount}] ${desc}`);
-
-              const fp = block.input?.file_path;
-              if (fp) {
-                const relPath = fp.replace(process.cwd() + '/', '');
-                if (block.name === 'Write' || block.name === 'Edit') {
-                  filesChanged.add(relPath);
-                } else if (block.name === 'Read') {
-                  filesRead.add(relPath);
+                  const fp = block.input?.file_path;
+                  if (fp) {
+                    const relPath = fp.replace(process.cwd() + '/', '');
+                    if (block.name === 'Write' || block.name === 'Edit') {
+                      filesChanged.add(relPath);
+                    } else if (block.name === 'Read') {
+                      filesRead.add(relPath);
+                    }
+                  }
+                  pushUpdate();
+                } else if (block.type === 'text' && block.text) {
+                  lastAssistantText = block.text;
                 }
               }
-              await pushUpdate();
-            } else if (block.type === 'text' && block.text) {
-              lastResultText = block.text;
-              const preview = block.text.slice(0, 150).replace(/\n/g, ' ');
-              core.info(`[Turn ${turnCount}] Claude: ${preview}`);
             }
+          } else if (event.type === 'error') {
+            const errMsg = event.error?.message || event.message || JSON.stringify(event);
+            core.error(`Claude error event: ${errMsg}`);
+            trackActivity(`Error: ${errMsg.slice(0, 100)}`);
+            pushUpdate(true);
           }
+        } catch {
+          // Skip unparseable
         }
       }
+    });
 
-      if (message.type === 'result') {
-        resultMessage = message;
-        core.info(`Claude finished: cost=$${message.total_cost_usd || '?'}, turns=${message.num_turns || '?'}, subtype=${message.subtype}`);
+    child.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    // Periodic updates
+    const monitor = setInterval(() => {
+      lastUpdateTime = 0;
+      pushUpdate();
+    }, 30000);
+
+    // Initial update
+    setTimeout(() => pushUpdate(true), 5000);
+
+    child.on('close', (code) => {
+      clearInterval(monitor);
+      const duration = Date.now() - startTime;
+
+      if (stderr) {
+        core.info(`Claude stderr: ${stderr.slice(-300)}`);
       }
-    }
-  } catch (error) {
-    core.error(`SDK execution error: ${error.message}`);
-    throw error;
-  }
 
-  const duration = Date.now() - startTime;
+      if (code !== 0 && !lastResult && !lastAssistantText) {
+        reject(new Error(`Claude exited with code ${code}: ${stderr.slice(-500)}`));
+        return;
+      }
 
-  if (!resultMessage) {
-    throw new Error('No result message received from Claude');
-  }
+      resolve({
+        output: lastResult?.result || lastAssistantText || '',
+        cost: lastResult?.cost_usd || lastResult?.total_cost_usd || null,
+        duration: lastResult?.duration_ms || duration,
+        turns: lastResult?.num_turns || turnCount,
+        exitCode: code,
+        filesChanged: [...filesChanged],
+      });
+    });
 
-  return {
-    output: lastResultText,
-    cost: resultMessage.total_cost_usd || null,
-    duration: resultMessage.duration_ms || duration,
-    turns: resultMessage.num_turns || turnCount,
-    exitCode: resultMessage.subtype === 'success' ? 0 : 1,
-    filesChanged: [...filesChanged],
-  };
+    child.on('error', (err) => {
+      clearInterval(monitor);
+      reject(new Error(`Failed to spawn Claude: ${err.message}`));
+    });
+  });
 }
 
 async function run() {
@@ -253,25 +262,21 @@ async function run() {
 
   const [owner, repo] = repoFull.split('/');
 
-  // Set auth based on mode
+  // Set auth
   if (authMode === 'max' || authMode === 'oauth') {
     if (!oauthToken) {
       core.setFailed('oauth-token is required when auth-mode is "max"');
       return;
     }
-    // Extract access token if full JSON provided
     let token = oauthToken;
     try {
       const parsed = JSON.parse(oauthToken);
       if (parsed.claudeAiOauth?.accessToken) {
         token = parsed.claudeAiOauth.accessToken;
       }
-    } catch {
-      // Already a plain token
-    }
+    } catch { /* plain token */ }
     process.env.CLAUDE_CODE_OAUTH_TOKEN = token;
-    core.info('Auth mode: Claude Max/Pro (OAuth)');
-    core.info(`Token set (${token.slice(0, 20)}...)`);
+    core.info(`Auth mode: Max/Pro (token: ${token.slice(0, 20)}...)`);
   } else {
     if (!apiKey) {
       core.setFailed('anthropic-api-key is required when auth-mode is "api-key"');
@@ -285,37 +290,25 @@ async function run() {
   const octokit = github.getOctokit(githubToken);
   const config = loadConfig();
   const model = modelInput || config.model || 'claude-sonnet-4-6';
-
   const updater = new IssueUpdater(octokit, owner, repo, issueNumber);
 
   try {
-    // Step 1: Post start comment
     core.info(`Starting Issue2Claude for issue #${issueNumber}`);
     await updater.postStartComment(model);
 
-    // Step 2: Fetch issue comments for context
     const comments = await updater.fetchComments();
     core.info(`Fetched ${comments.length} issue comments for context`);
 
-    // Step 3: Build prompt
-    const prompt = buildPrompt({
-      issueNumber,
-      issueTitle,
-      issueBody,
-      comments,
-      config,
-    });
+    const prompt = buildPrompt({ issueNumber, issueTitle, issueBody, comments, config });
     core.info('Prompt built successfully');
 
-    // Step 4: Run Claude Code via SDK
     const result = await runClaude(prompt, model, updater);
     core.info(`Claude finished in ${Math.round(result.duration / 1000)}s`);
 
     if (result.exitCode !== 0) {
-      core.warning(`Claude finished with errors, checking for changes anyway...`);
+      core.warning(`Claude exited with code ${result.exitCode}, checking for changes anyway...`);
     }
 
-    // Step 5: Check for git changes
     const gitStatus = execSync('git status --porcelain').toString().trim();
 
     if (!gitStatus) {
@@ -325,18 +318,11 @@ async function run() {
       return;
     }
 
-    // Step 6: Create PR
-    core.info(`Changes detected, creating PR...`);
+    core.info('Changes detected, creating PR...');
     const summary = parseSummary(result.output) || 'Claude made changes but did not provide a structured summary.';
 
     const pr = await createPR({
-      octokit,
-      owner,
-      repo,
-      issueNumber,
-      issueTitle,
-      summary,
-      model,
+      octokit, owner, repo, issueNumber, issueTitle, summary, model,
       cost: result.cost ? result.cost.toFixed(2) : null,
       duration: result.duration,
       tokens: result.turns ? `${result.turns} turns` : null,
@@ -344,11 +330,8 @@ async function run() {
 
     core.info(`PR created: ${pr.prUrl}`);
 
-    // Step 7: Post finish comment
     await updater.postFinishComment({
-      prNumber: pr.prNumber,
-      branchName: pr.branchName,
-      summary,
+      prNumber: pr.prNumber, branchName: pr.branchName, summary,
       cost: result.cost ? result.cost.toFixed(2) : null,
       duration: result.duration,
       tokens: result.turns ? `${result.turns} turns` : null,
