@@ -342,13 +342,33 @@ async function run() {
       return;
     }
     // Write credentials file so Claude Code picks up the OAuth session
+    // The token should be the full JSON content of ~/.claude/.credentials.json
     const claudeDir = path.join(process.env.HOME || '/root', '.claude');
     fs.mkdirSync(claudeDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(claudeDir, '.credentials.json'),
-      JSON.stringify({ oauthToken }),
-    );
+
+    // Support both raw JSON and plain access token
+    let credContent;
+    try {
+      const parsed = JSON.parse(oauthToken);
+      if (parsed.claudeAiOauth) {
+        // Full credentials JSON — write as-is
+        credContent = oauthToken;
+      } else {
+        // Unknown structure, wrap it
+        credContent = JSON.stringify(parsed);
+      }
+    } catch {
+      // Plain access token string — build the credentials structure
+      credContent = JSON.stringify({
+        claudeAiOauth: {
+          accessToken: oauthToken,
+        },
+      });
+    }
+
+    fs.writeFileSync(path.join(claudeDir, '.credentials.json'), credContent);
     core.info('Auth mode: Claude Max/Pro (OAuth)');
+    core.info(`Credentials written to ${claudeDir}/.credentials.json`);
   } else {
     if (!apiKey) {
       core.setFailed('anthropic-api-key is required when auth-mode is "api-key"');
