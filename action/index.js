@@ -151,6 +151,19 @@ async function runClaude(prompt, model, updater) {
     core.warning('Could not locate claude CLI');
   }
 
+  // Debug: test claude directly first
+  try {
+    const testOut = execSync('claude -p "respond with OK" --output-format json --max-turns 1 2>&1 || true', {
+      encoding: 'utf-8',
+      timeout: 30000,
+      env: { ...process.env },
+    });
+    core.info(`Claude test output: ${testOut.slice(0, 500)}`);
+  } catch (e) {
+    core.error(`Claude test failed: ${e.message}`);
+    core.error(`Claude test stderr: ${e.stderr || 'none'}`);
+  }
+
   // Run Claude via SDK
   core.info(`Running Claude via Agent SDK (model: ${model})...`);
 
