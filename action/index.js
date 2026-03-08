@@ -3,6 +3,7 @@ const github = require('@actions/github');
 const { execSync, spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const https = require('https');
 const yaml = require('js-yaml');
 
 const { buildPrompt, readFileIfExists } = require('./prompt-builder');
@@ -259,19 +260,127 @@ async function runClaude(prompt, model, updater, options = {}) {
   });
 }
 
-function setupAuth(authMode, apiKey, oauthToken) {
+/**
+ * Refresh an expired OAuth token using the refresh token.
+ * Returns the new access token or null on failure.
+ */
+async function refreshOAuthToken(refreshToken) {
+  const CLAUDE_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
+
+  return new Promise((resolve) => {
+    const body = JSON.stringify({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+      client_id: CLAUDE_CLIENT_ID,
+    });
+
+    const req = https.request({
+      hostname: 'console.anthropic.com',
+      path: '/v1/oauth/token',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body),
+        'User-Agent': 'claude-code/1.0',
+      },
+    }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.access_token) {
+            core.info('OAuth token refreshed successfully');
+            resolve({
+              accessToken: parsed.access_token,
+              refreshToken: parsed.refresh_token || refreshToken,
+              expiresAt: Date.now() + (parsed.expires_in || 3600) * 1000,
+            });
+          } else {
+            core.warning(`Token refresh failed: ${data.slice(0, 200)}`);
+            resolve(null);
+          }
+        } catch {
+          core.warning(`Token refresh response parse error`);
+          resolve(null);
+        }
+      });
+    });
+
+    req.on('error', (e) => {
+      core.warning(`Token refresh network error: ${e.message}`);
+      resolve(null);
+    });
+
+    req.write(body);
+    req.end();
+  });
+}
+
+/**
+ * Write Claude credentials to disk so Claude Code can authenticate.
+ */
+function writeCredentials(credentials) {
+  const claudeDir = path.join(process.env.HOME || '/root', '.claude');
+  fs.mkdirSync(claudeDir, { recursive: true });
+  const credPath = path.join(claudeDir, '.credentials.json');
+  fs.writeFileSync(credPath, JSON.stringify(credentials, null, 2));
+  core.info(`Credentials written to ${credPath}`);
+}
+
+async function setupAuth(authMode, apiKey, oauthToken) {
   if (authMode === 'max' || authMode === 'oauth') {
     if (!oauthToken) {
       core.setFailed('oauth-token is required when auth-mode is "max"');
       return false;
     }
+
     let token = oauthToken;
+    let refreshToken = null;
+    let expiresAt = null;
+
+    // Try to parse as full credentials JSON
     try {
       const parsed = JSON.parse(oauthToken);
-      if (parsed.claudeAiOauth?.accessToken) {
-        token = parsed.claudeAiOauth.accessToken;
+      const oauth = parsed.claudeAiOauth || parsed;
+      if (oauth.accessToken) {
+        token = oauth.accessToken;
+        refreshToken = oauth.refreshToken || null;
+        expiresAt = oauth.expiresAt || null;
       }
-    } catch { /* plain token */ }
+    } catch { /* plain token string */ }
+
+    // Check if token is expired and try to refresh
+    if (expiresAt && refreshToken && Date.now() >= expiresAt) {
+      core.info('OAuth token expired, attempting refresh...');
+      const refreshed = await refreshOAuthToken(refreshToken);
+      if (refreshed) {
+        token = refreshed.accessToken;
+        refreshToken = refreshed.refreshToken;
+        expiresAt = refreshed.expiresAt;
+
+        // Write refreshed credentials to disk for Claude Code
+        const credentials = {
+          claudeAiOauth: {
+            accessToken: token,
+            refreshToken: refreshToken,
+            expiresAt: expiresAt,
+            scopes: ['user:inference', 'user:profile', 'user:sessions:claude_code'],
+          },
+        };
+        writeCredentials(credentials);
+        core.info('Refreshed token written to credentials file');
+      } else {
+        core.warning('Token refresh failed, trying with existing token...');
+      }
+    } else if (refreshToken) {
+      // Token not expired but we have full credentials — write them for Claude Code
+      try {
+        const credentials = JSON.parse(oauthToken);
+        writeCredentials(credentials);
+      } catch { /* plain token, no file needed */ }
+    }
+
     process.env.CLAUDE_CODE_OAUTH_TOKEN = token;
     core.info(`Auth mode: Max/Pro (token: ${token.slice(0, 20)}...)`);
   } else {
@@ -784,7 +893,7 @@ async function run() {
   }
 
   // All other modes need Claude auth
-  const authOk = setupAuth(authMode, apiKey, oauthToken);
+  const authOk = await setupAuth(authMode, apiKey, oauthToken);
   if (!authOk) return;
 
   const octokit = github.getOctokit(githubToken);
