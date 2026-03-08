@@ -350,17 +350,13 @@ async function setupAuth(authMode, apiKey, oauthToken) {
       }
     } catch { /* plain token string */ }
 
-    // Check if token is expired and try to refresh
-    if (expiresAt && refreshToken && Date.now() >= expiresAt) {
-      core.info('OAuth token expired, attempting refresh...');
-      const refreshed = await refreshOAuthToken(refreshToken);
-      if (refreshed) {
-        token = refreshed.accessToken;
-        refreshToken = refreshed.refreshToken;
-        expiresAt = refreshed.expiresAt;
-
-        // Write refreshed credentials to disk for Claude Code
-        const credentials = {
+    // Always write credentials to disk — Claude Code handles its own token refresh
+    if (refreshToken) {
+      let credentials;
+      try {
+        credentials = JSON.parse(oauthToken);
+      } catch {
+        credentials = {
           claudeAiOauth: {
             accessToken: token,
             refreshToken: refreshToken,
@@ -368,17 +364,35 @@ async function setupAuth(authMode, apiKey, oauthToken) {
             scopes: ['user:inference', 'user:profile', 'user:sessions:claude_code'],
           },
         };
-        writeCredentials(credentials);
-        core.info('Refreshed token written to credentials file');
-      } else {
-        core.warning('Token refresh failed, trying with existing token...');
       }
-    } else if (refreshToken) {
-      // Token not expired but we have full credentials — write them for Claude Code
-      try {
-        const credentials = JSON.parse(oauthToken);
+      writeCredentials(credentials);
+
+      if (expiresAt && Date.now() >= expiresAt) {
+        core.info('OAuth token expired — Claude Code will auto-refresh using credentials file');
+      }
+    }
+
+    // Also try our own refresh as fallback
+    if (expiresAt && refreshToken && Date.now() >= expiresAt) {
+      core.info('Attempting pre-emptive token refresh...');
+      const refreshed = await refreshOAuthToken(refreshToken);
+      if (refreshed) {
+        token = refreshed.accessToken;
+        core.info('Token refreshed successfully');
+
+        // Update credentials file with new token
+        const credentials = {
+          claudeAiOauth: {
+            accessToken: refreshed.accessToken,
+            refreshToken: refreshed.refreshToken,
+            expiresAt: refreshed.expiresAt,
+            scopes: ['user:inference', 'user:profile', 'user:sessions:claude_code'],
+          },
+        };
         writeCredentials(credentials);
-      } catch { /* plain token, no file needed */ }
+      } else {
+        core.info('Pre-emptive refresh failed, relying on Claude Code built-in refresh');
+      }
     }
 
     process.env.CLAUDE_CODE_OAUTH_TOKEN = token;
