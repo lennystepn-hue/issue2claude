@@ -257,11 +257,27 @@ branch_prefix: issue2claude
 <td>Run <code>claude setup-token</code> in terminal</td>
 </tr>
 <tr>
+<td><strong>Token expiry</strong></td>
+<td>Never</td>
+<td>Auto-refresh (see below)</td>
+</tr>
+<tr>
 <td><strong>Workflow</strong></td>
 <td><code>auth-mode: api-key</code></td>
 <td><code>auth-mode: max</code></td>
 </tr>
 </table>
+
+### OAuth Auto-Refresh (Claude Max/Pro)
+
+OAuth tokens expire after ~12 hours. Issue2Claude can **auto-refresh** them if you store the full credentials JSON (not just the access token):
+
+```bash
+# Store full credentials with refresh token:
+cat ~/.claude/.credentials.json | gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo your/repo
+```
+
+Issue2Claude writes the credentials to disk so Claude Code can refresh the token itself. If you only store the plain access token, you'll need to manually run `claude setup-token` and update the secret when it expires.
 
 ### Optional: Repo Context Index
 
