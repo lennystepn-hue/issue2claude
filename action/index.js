@@ -152,8 +152,17 @@ async function runClaude(prompt, model, updater, options = {}) {
     // Use shell to read prompt from file
     const allowedTools = options.allowedTools || 'Read,Write,Edit,Bash,Glob,Grep';
     const maxTurns = options.maxTurns || 3000;
+    // Sanitize env: remove sensitive keys so Claude cannot exfiltrate them
+    const sanitizedEnv = { ...process.env };
+    const sensitiveKeys = ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'INPUT_ANTHROPIC-API-KEY', 'INPUT_OAUTH-TOKEN', 'INPUT_OPENAI-API-KEY', 'INPUT_GITHUB-TOKEN'];
+    for (const key of sensitiveKeys) {
+      delete sanitizedEnv[key];
+    }
+    // Keep GITHUB_TOKEN (needed for gh CLI in PR creation) but mask it
+    // Keep CLAUDE_CODE_OAUTH_TOKEN (needed for Claude auth)
+
     const child = spawn('bash', ['-c', `cat "${promptFile}" | claude -p - --allowedTools ${allowedTools} --max-turns ${maxTurns} --output-format stream-json --verbose --model ${model} --dangerously-skip-permissions`], {
-      env: { ...process.env },
+      env: sanitizedEnv,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
@@ -347,6 +356,9 @@ async function setupAuth(authMode, apiKey, oauthToken) {
         token = oauth.accessToken;
         refreshToken = oauth.refreshToken || null;
         expiresAt = oauth.expiresAt || null;
+        // Mask all tokens from logs
+        core.setSecret(token);
+        if (refreshToken) core.setSecret(refreshToken);
       }
     } catch { /* plain token string */ }
 
@@ -396,7 +408,8 @@ async function setupAuth(authMode, apiKey, oauthToken) {
     }
 
     process.env.CLAUDE_CODE_OAUTH_TOKEN = token;
-    core.info(`Auth mode: Max/Pro (token: ${token.slice(0, 20)}...)`);
+    core.setSecret(token);
+    core.info(`Auth mode: Max/Pro (token: ${token.slice(0, 8)}...)`);
   } else {
     if (!apiKey) {
       core.setFailed('anthropic-api-key is required when auth-mode is "api-key"');
